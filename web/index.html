@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>agent-session-bus</title>
+<style>
+  :root{
+    --bg:#0b0f17; --panel:#111827; --panel2:#0f1522; --line:#1f2937; --line2:#243244;
+    --fg:#e5e7eb; --mut:#94a3b8; --dim:#64748b;
+    --codex:#10a37f; --pi:#a855f7; --claude:#e0895a; --opencode:#3b82f6;
+    --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+  header .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok)}
+  header .roots{color:var(--dim);font-size:12px;margin-left:auto;display:none}
+  button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line2);border-radius:8px;padding:7px 12px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:#fff}
+  button.primary{background:linear-gradient(180deg,#0ea5e9,#0284c7);border-color:#0284c7;color:#fff;font-weight:600}
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .wrap{display:grid;grid-template-columns:360px 1fr;height:calc(100vh - 53px)}
+  .side{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--panel2)}
+  .side .tools{padding:12px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+  input,select{font:inherit;color:inherit;background:#0b1220;border:1px solid var(--line2);border-radius:8px;padding:8px 10px;width:100%}
+  input:focus,select:focus{outline:none;border-color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{display:flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line2);border-radius:999px;background:#0b1220;cursor:pointer;font-size:12px;color:var(--mut)}
+  .chip .n{color:var(--dim);font-variant-numeric:tabular-nums}
+  .chip.on{border-color:var(--accent);color:#fff;background:#0c1a2a}
+  .list{overflow:auto;flex:1;min-height:0}
+  .item{padding:10px 12px;border-bottom:1px solid #16202f;cursor:pointer;display:flex;gap:10px}
+  .item:hover{background:#0e1626}
+  .item.on{background:#0c1a2a;box-shadow:inset 3px 0 0 var(--accent)}
+  .badge{flex:0 0 auto;font-size:10px;font-weight:700;letter-spacing:.4px;padding:2px 6px;border-radius:6px;height:18px;line-height:14px;text-transform:uppercase}
+  .b-codex{background:rgba(16,163,127,.16);color:var(--codex);border:1px solid rgba(16,163,127,.4)}
+  .b-pi{background:rgba(168,85,247,.16);color:var(--pi);border:1px solid rgba(168,85,247,.4)}
+  .b-claude{background:rgba(224,137,90,.16);color:var(--claude);border:1px solid rgba(224,137,90,.4)}
+  .b-opencode{background:rgba(59,130,246,.16);color:var(--opencode);border:1px solid rgba(59,130,246,.4)}
+  .item .meta{min-width:0}
+  .item .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px}
+  .item .s{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:ui-monospace,Consolas,monospace}
+  .main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .shead{padding:12px 18px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:var(--panel)}
+  .shead .id{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:var(--mut)}
+  .shead .kv{color:var(--dim);font-size:12px}
+  .inject{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .inject select{width:auto;padding:6px 8px}
+  .inject input.cwd{width:220px;padding:6px 8px}
+  .transcript{overflow:auto;padding:16px 20px 60px;flex:1;min-height:0}
+  .msg{border:1px solid var(--line);border-radius:12px;margin:0 0 12px;overflow:hidden;background:var(--panel)}
+  .msg .mh{display:flex;gap:8px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line);background:#0d1420}
+  .msg .role{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:999px;border:1px solid var(--line2);color:var(--mut)}
+  .role.user{color:#7dd3fc;border-color:rgba(125,211,252,.4)}
+  .role.assistant{color:#86efac;border-color:rgba(134,239,172,.35)}
+  .role.system{color:#fbbf24;border-color:rgba(251,191,36,.35)}
+  .role.tool{color:#f0abfc;border-color:rgba(240,171,252,.35)}
+  .msg .mb{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+  .txt{white-space:pre-wrap;word-break:break-word}
+  .part{border:1px solid var(--line);border-radius:8px;background:#0b1220;padding:8px 10px}
+  .part .ph{font-size:11px;color:var(--dim);margin-bottom:6px;font-family:ui-monospace,Consolas,monospace;word-break:break-all}
+  pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.5 ui-monospace,Consolas,"SFMono-Regular",monospace;color:#cbd5e1;max-height:340px;overflow:auto}
+  details.reason summary{cursor:pointer;color:var(--dim);font-size:12px}
+  .pill{font-size:11px;color:var(--dim)}
+  .empty{color:var(--dim);padding:40px;text-align:center}
+  .toast{position:fixed;right:18px;bottom:18px;max-width:560px;background:#0d1420;border:1px solid var(--line2);border-left:3px solid var(--accent);border-radius:10px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.5);display:none}
+  .toast.show{display:block}
+  .toast .th{font-weight:650;margin-bottom:6px}
+  .toast pre{max-height:220px}
+  .ok{color:var(--ok)} .err{color:var(--err)} .warn{color:var(--warn)}
+  .matrix{display:flex;gap:6px;flex-wrap:wrap;padding:10px 18px;border-bottom:1px solid var(--line);background:var(--panel2);font-size:12px;align-items:center}
+  .matrix .lbl{color:var(--dim)}
+  .arrowuse{font-family:ui-monospace,Consolas,monospace;color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <span class="dot"></span>
+  <h1>agent-session-bus</h1>
+  <span class="pill" id="stat">loading…</span>
+  <button id="refresh">刷新</button>
+  <span class="roots" id="roots"></span>
+</header>
+
+<div class="wrap">
+  <aside class="side">
+    <div class="tools">
+      <input id="q" placeholder="搜索 id / cwd / 标题…" />
+      <div class="chips" id="chips"></div>
+    </div>
+    <div class="list" id="list"><div class="empty">加载中…</div></div>
+  </aside>
+
+  <section class="main">
+    <div class="matrix" id="matrix">
+      <span class="lbl">互通：</span>
+      <span class="arrowuse">选一个会话 → 选择目标 Agent → Inject，再用 Verify 让目标 Agent 自己读出来</span>
+    </div>
+    <div class="shead" id="shead" style="display:none"></div>
+    <div class="transcript" id="transcript"><div class="empty">← 选择一个会话</div></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const AGENTS = ['codex','pi','claude','opencode'];
+const COLORS = {codex:'var(--codex)',pi:'var(--pi)',claude:'var(--claude)',opencode:'var(--opencode)'};
+let SESSIONS = [], FILTER = 'all', SEL = null, IR = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s==null?'':s).replace(/[&<>"']/g,(c)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clip = (s,n)=>s.length>n? s.slice(0,n)+`\n…[+${s.length-n}]`:s;
+function fmt(ms){ if(!ms) return '-'; try{return new Date(ms).toISOString().replace('T',' ').slice(0,19)}catch{return '-'} }
+
+async function api(pathname, opts){ const r = await fetch(pathname, opts); return r.json(); }
+
+async function load(){
+  const data = await api('/api/sessions');
+  SESSIONS = data.sessions || [];
+  $('roots').textContent = Object.entries(data.roots||{}).map(([k,v])=>`${k}: ${v}`).join('  ·  ');
+  $('roots').style.display='inline';
+  const counts = {}; for(const s of SESSIONS) counts[s.agent]=(counts[s.agent]||0)+1;
+  $('stat').textContent = `${SESSIONS.length} sessions · ` + AGENTS.map(a=>`${a} ${counts[a]||0}`).join(' / ');
+  renderChips(counts); renderList();
+}
+function renderChips(counts){
+  const chips = [['all','全部'],...AGENTS.map(a=>[a,a])];
+  $('chips').innerHTML = chips.map(([k,label])=>{
+    const n = k==='all'?SESSIONS.length:(counts[k]||0);
+    return `<div class="chip ${FILTER===k?'on':''}" data-k="${k}">${esc(label)} <span class="n">${n}</span></div>`;
+  }).join('');
+  $('chips').querySelectorAll('.chip').forEach(c=>c.onclick=()=>{FILTER=c.dataset.k;renderChips(counts);renderList();});
+}
+function visible(){
+  const q = $('q').value.trim().toLowerCase();
+  return SESSIONS.filter(s=>{
+    if(s.error) return false;
+    if(FILTER!=='all' && s.agent!==FILTER) return false;
+    if(!q) return true;
+    return [s.id,s.cwd,s.title,s.session_id].some(v=>String(v||'').toLowerCase().includes(q));
+  });
+}
+function renderList(){
+  const rows = visible();
+  if(!rows.length){ $('list').innerHTML='<div class="empty">没有匹配的会话</div>'; return; }
+  $('list').innerHTML = rows.map((s,i)=>{
+    const on = SEL && SEL.agent===s.agent && SEL.id===s.id;
+    return `<div class="item ${on?'on':''}" data-i="${SESSIONS.indexOf(s)}">
+      <span class="badge b-${s.agent}">${s.agent}</span>
+      <div class="meta">
+        <div class="t">${esc(s.title||s.id)}</div>
+        <div class="s">${esc(fmt(s.created_at))} · ${esc(s.cwd||'-')}</div>
+      </div></div>`;
+  }).join('');
+  $('list').querySelectorAll('.item').forEach(el=>el.onclick=()=>select(SESSIONS[+el.dataset.i]));
+}
+$('q').addEventListener('input',renderList);
+
+async function select(s){
+  SEL = {agent:s.agent,id:s.id}; renderList();
+  $('transcript').innerHTML='<div class="empty">加载中…</div>';
+  try{
+    IR = await api(`/api/session?agent=${encodeURIComponent(s.agent)}&id=${encodeURIComponent(s.id)}`);
+  }catch(e){ $('transcript').innerHTML=`<div class="empty err">读取失败 ${esc(e)}</div>`; return; }
+  renderHead(s); renderTranscript();
+}
+function renderHead(s){
+  const el = $('shead'); el.style.display='flex';
+  el.innerHTML = `
+    <span class="badge b-${s.agent}">${s.agent}</span>
+    <span class="id">${esc(s.id)}</span>
+    <span class="kv">cwd ${esc(IR.cwd||'-')}</span>
+    <span class="kv">model ${esc(IR.model||'-')}</span>
+    <span class="kv">${fmt(IR.created_at)}</span>
+    <span class="kv">${IR.messages.length} msgs</span>
+    <span class="inject">
+      <span class="lbl">注入到</span>
+      <select id="to">${AGENTS.map(a=>`<option value="${a}">${a}</option>`).join('')}</select>
+      <select id="mode"><option value="native">native</option><option value="context">context</option></select>
+      <input class="cwd" id="cwd" placeholder="context 模式 cwd (可选)" value="${esc(IR.cwd||'')}" />
+      <label class="pill"><input type="checkbox" id="dry" style="width:auto"> dry-run</label>
+      <button class="primary" id="go">Inject</button>
+    </span>`;
+  $('go').onclick = doInject;
+}
+function renderTranscript(){
+  if(!IR || !IR.messages.length){ $('transcript').innerHTML='<div class="empty">空会话</div>'; return; }
+  $('transcript').innerHTML = IR.messages.map(m=>{
+    const parts = (m.parts||[]).map(p=>{
+      if(p.type==='text') return `<div class="txt">${esc(p.text)}</div>`;
+      if(p.type==='reasoning') return `<details class="reason"><summary>reasoning ${p.opaque?'(opaque)':''}</summary><pre>${esc(p.text||'[encrypted / omitted]')}</pre></details>`;
+      if(p.type==='tool_call') return `<div class="part"><div class="ph">tool_call · ${esc(p.name||'?')}</div><pre>${esc(clip(JSON.stringify(p.input,null,2),2000))}</pre></div>`;
+      if(p.type==='tool_result') return `<div class="part"><div class="ph">tool_result${p.is_error?' · ERROR':''}</div><pre>${esc(clip(String(p.output||''),2500))}</pre></div>`;
+      if(p.type==='image') return `<div class="part"><div class="ph">image ${esc(p.mime||'')}</div><div class="pill">[base64 omitted]</div></div>`;
+      return '';
+    }).join('');
+    return `<div class="msg"><div class="mh"><span class="role ${m.role}">${esc(m.role)}</span><span class="pill">${fmt(m.ts)}</span></div><div class="mb">${parts}</div></div>`;
+  }).join('');
+}
+
+async function doInject(){
+  const body = {fromAgent:SEL.agent, fromId:SEL.id, to:$('to').value, mode:$('mode').value, cwd:$('cwd').value||undefined, dryRun:$('dry').checked};
+  $('go').disabled=true;
+  try{
+    const r = await api('/api/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.error){ toast('Inject 失败','<span class="err">'+esc(r.error)+'</span>'); return; }
+    const lines = [
+      `target: <b>${esc(r.target)}</b> · action: ${esc(r.action)} · wrote: ${r.wrote}`,
+      `file: <span class="arrowuse">${esc(r.file)}</span>`,
+      r.sid? `sid: <span class="arrowuse">${esc(r.sid)}</span>`:'',
+      r.hint? `read it with: <span class="arrowuse">${esc(r.hint)}</span>`:'',
+      r.register && (r.register.inserted || r.register.already) ? `codex metadata: ${r.register.inserted ? 'registered' : 'already present'}` : '',
+      r.note? esc(r.note):'',
+    ].filter(Boolean).join('<br>');
+    let verifyBlock = '';
+    if(r.wrote && r.action==='native' && !r.dryRun){
+      verifyBlock = `<div style="margin-top:8px"><button id="vbtn">Verify：让 ${esc(r.target)} 自己读出来</button><div id="vout"></div></div>`;
+    }
+    toast(`已注入 → ${r.target}`, lines + verifyBlock);
+    if(verifyBlock){
+      $('vbtn').onclick = async ()=>{
+        $('vbtn').disabled=true; $('vout').innerHTML='<div class="pill">运行中…</div>';
+        const v = await api('/api/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:r.target, sid:r.sid, file:r.file})});
+        $('vout').innerHTML = `<div class="ph" style="margin-top:8px">$ ${esc(v.cmd)}</div><pre class="${v.ok?'ok':'err'}">${esc(v.output||'(no output)')}</pre>`;
+      };
+    }
+    if(r.wrote){ load(); }
+  } finally { $('go').disabled=false; }
+}
+function toast(title, html){
+  const t=$('toast');
+  t.innerHTML = `<div class="th">${esc(title)}</div><div>${html}</div>`;
+  t.classList.add('show');
+  clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'), 30000);
+}
+
+$('refresh').onclick=load;
+load();
+</script>
+</body>
+</html>

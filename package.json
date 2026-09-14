@@ -1,0 +1,53 @@
+{
+  "name": "agent-session-easy-connect",
+  "version": "1.0.0",
+  "description": "Session and skill interchange for coding agents. Read, normalize and inject sessions between Codex, OpenCode, Claude Code and Pi, and sync SKILL.md skills across all of them.",
+  "keywords": [
+    "agent",
+    "session",
+    "session-interop",
+    "skill",
+    "skills",
+    "interchange",
+    "codex",
+    "opencode",
+    "claude-code",
+    "pi",
+    "ai-agent",
+    "mcp"
+  ],
+  "type": "commonjs",
+  "main": "src/cli.js",
+  "bin": {
+    "asec": "./src/cli.js",
+    "asb": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node ./src/cli.js",
+    "list": "node ./src/cli.js list",
+    "skills": "node ./src/cli.js skills list",
+    "tui": "node ./src/cli.js tui",
+    "web": "node ./src/cli.js web --port 8787"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xyls999/agent-SessionEasyConnect.git"
+  },
+  "homepage": "https://github.com/xyls999/agent-SessionEasyConnect#readme",
+  "bugs": {
+    "url": "https://github.com/xyls999/agent-SessionEasyConnect/issues"
+  },
+  "author": "xyls999",
+  "license": "MIT",
+  "files": [
+    "src",
+    "web",
+    "docs",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ]
+}

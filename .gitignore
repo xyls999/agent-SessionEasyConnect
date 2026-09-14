@@ -1,0 +1,17 @@
+# dependencies
+node_modules/
+
+# logs
+*.log
+npm-debug.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# local test artifacts
+*.tmp
+*.bak
+tmp/
