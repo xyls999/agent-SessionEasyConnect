@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](https://semver.org/).
 
+## [1.0.2] - 2026-09-15
+
+### Fixed
+- **Codex injection: drop the `response_item` reasoning record.** Codex replays
+  `response_item` entries as Responses API input items. A reasoning item has no portable
+  text (only `id` + `encrypted_content`), so the server tries to look it up by id and
+  returns `404 Item with id 'rs_...' not found. Items are not persisted when 'store' is
+  set to false.` on resume. We cannot fabricate valid `encrypted_content`, so the
+  generator now omits `response_item` reasoning entirely and keeps only the typed
+  `event_msg.item_completed` `Reasoning` item (UI/history placeholder).
+- Verified on the Pi `tmp-issac` session (`01a096ef`): generated rollout has
+  `response_item_reasoning = 0`, 289 typed `Reasoning` items, 312/311 tool call/output
+  with max `call_id` 29, 0 invalid, 0 unmatched.
+
 ## [1.0.1] - 2026-09-15
 
 ### Fixed

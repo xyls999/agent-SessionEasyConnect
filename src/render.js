@@ -135,9 +135,12 @@ function genCodex(ir) {
           item({ type: 'AgentMessage', id: `msg_${U.hexId(20)}`, content: [{ type: 'Text', text: p.text }], phase: 'final_answer' }, m.ts);
         }
       } else if (p.type === 'reasoning') {
-        const rid = `rs_${U.hexId(20)}`;
-        push('response_item', { type: 'reasoning', id: rid, summary: [], content: null, encrypted_content: '' }, iso(m.ts));
-        item({ type: 'Reasoning', id: rid, summary_text: [], raw_content: [] }, m.ts);
+        // Do NOT emit a response_item reasoning record. Codex replays response_item
+        // entries as Responses API input items, and a reasoning item without valid
+        // encrypted_content is looked up by id on the server, which 404s when store=false
+        // ("Item with id 'rs_...' not found"). Reasoning is not portable anyway, so keep
+        // only the typed item_completed so the TUI/history still shows a placeholder.
+        item({ type: 'Reasoning', id: `rs_${U.hexId(20)}`, summary_text: [], raw_content: [] }, m.ts);
       } else if (p.type === 'tool_call') {
         const callId = U.sanitizeCallId(p.id);
         push('response_item', { type: 'function_call', id: `fc_${U.hexId(20)}`, name: p.name || 'tool', arguments: JSON.stringify(p.input == null ? {} : p.input), call_id: callId, internal_chat_message_metadata_passthrough: { turn_id: turnId } }, iso(m.ts));
