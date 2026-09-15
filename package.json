@@ -1,6 +1,6 @@
 {
   "name": "agent-session-easy-connect",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Session and skill interchange for coding agents. Read, normalize and inject sessions between Codex, OpenCode, Claude Code and Pi, and sync SKILL.md skills across all of them.",
   "keywords": [
     "agent",

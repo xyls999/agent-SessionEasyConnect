@@ -139,7 +139,7 @@ function genCodex(ir) {
         push('response_item', { type: 'reasoning', id: rid, summary: [], content: null, encrypted_content: '' }, iso(m.ts));
         item({ type: 'Reasoning', id: rid, summary_text: [], raw_content: [] }, m.ts);
       } else if (p.type === 'tool_call') {
-        const callId = p.id || `call_${base62(12)}`;
+        const callId = U.sanitizeCallId(p.id);
         push('response_item', { type: 'function_call', id: `fc_${U.hexId(20)}`, name: p.name || 'tool', arguments: JSON.stringify(p.input == null ? {} : p.input), call_id: callId, internal_chat_message_metadata_passthrough: { turn_id: turnId } }, iso(m.ts));
         const cmd = p.input && (p.input.command || p.input.cmd || p.input.shell);
         if (cmd) {
@@ -151,7 +151,7 @@ function genCodex(ir) {
           }, m.ts);
         }
       } else if (p.type === 'tool_result') {
-        push('response_item', { type: 'function_call_output', id: `fco_${U.hexId(20)}`, call_id: p.id || `call_${base62(12)}`, output: String(p.output == null ? '' : p.output) }, iso(m.ts));
+        push('response_item', { type: 'function_call_output', id: `fco_${U.hexId(20)}`, call_id: U.sanitizeCallId(p.id), output: String(p.output == null ? '' : p.output) }, iso(m.ts));
       }
     }
   }
@@ -212,7 +212,7 @@ function genClaude(ir) {
         if (p.type !== 'tool_result') continue;
         const r = base();
         r.type = 'user';
-        r.message = { role: 'user', content: [{ type: 'tool_result', tool_use_id: p.id || `toolu_${base62(16)}`, content: [{ type: 'text', text: String(p.output == null ? '' : p.output) }], is_error: !!p.is_error }] };
+        r.message = { role: 'user', content: [{ type: 'tool_result', tool_use_id: U.sanitizeCallId(p.id, 'toolu_'), content: [{ type: 'text', text: String(p.output == null ? '' : p.output) }], is_error: !!p.is_error }] };
         if (m.ts) r.timestamp = U.msToIso(m.ts);
         lines.push(JSON.stringify(r)); prevUuid = r.uuid;
       }
@@ -234,7 +234,7 @@ function genClaude(ir) {
       const content = [];
       for (const p of (m.parts || [])) {
         if (p.type === 'text') content.push({ type: 'text', text: p.text });
-        else if (p.type === 'tool_call') content.push({ type: 'tool_use', id: p.id || `toolu_${base62(16)}`, name: p.name || 'tool', input: p.input == null ? {} : p.input });
+        else if (p.type === 'tool_call') content.push({ type: 'tool_use', id: U.sanitizeCallId(p.id, 'toolu_'), name: p.name || 'tool', input: p.input == null ? {} : p.input });
       }
       if (!content.length) continue;
       r.message = { id: `msg_${base62(20)}`, type: 'message', role: 'assistant', model: m.model || ir.model || 'imported', content, stop_reason: 'end_turn' };
@@ -262,8 +262,8 @@ function genOpenCodeImport(ir) {
       const baseP = { id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid };
       if (p.type === 'text') parts.push({ ...baseP, type: 'text', text: p.text });
       else if (p.type === 'reasoning') parts.push({ ...baseP, type: 'reasoning', text: p.text || '' });
-      else if (p.type === 'tool_call') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: p.id || `call_${base62(12)}`, state: { status: 'completed', input: p.input == null ? {} : p.input, output: '' } });
-      else if (p.type === 'tool_result') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: p.id || `call_${base62(12)}`, state: { status: p.is_error ? 'error' : 'completed', input: {}, output: String(p.output == null ? '' : p.output) } });
+      else if (p.type === 'tool_call') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: U.sanitizeCallId(p.id), state: { status: 'completed', input: p.input == null ? {} : p.input, output: '' } });
+      else if (p.type === 'tool_result') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: U.sanitizeCallId(p.id), state: { status: p.is_error ? 'error' : 'completed', input: {}, output: String(p.output == null ? '' : p.output) } });
     }
     const role = m.role === 'tool' ? 'user' : m.role;
     const minfo = { id: mid, sessionID: sid, role, agent: 'build', time: { created: m.ts || created } };

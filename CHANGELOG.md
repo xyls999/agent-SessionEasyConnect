@@ -3,6 +3,20 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](https://semver.org/).
 
+## [1.0.1] - 2026-09-15
+
+### Fixed
+- **Codex injection: tool `call_id` length/charset.** Pi stores composite tool-call ids
+  (`call_xxx|fc_yyy`, ~83 chars). They were written verbatim into Codex's
+  `function_call.call_id` / `function_call_output.call_id`, which made Codex reject the
+  resumed request with HTTP 400:
+  `[StringParam] [input[7].call_id] [string_above_max_length] ... maximum length 64`.
+  Call ids are now normalized deterministically (`U.sanitizeCallId`: split on `|`, keep
+  `[A-Za-z0-9_-]`, cap at 64) and call/output stay paired. Also applied to the Claude and
+  OpenCode generators.
+- Verified against the Pi `tmp-issac` session (`01a096ef`, 773 messages / 312 tool calls):
+  the generated rollout now has max `call_id` length 29, 0 invalid ids, 0 unmatched outputs.
+
 ## [1.0.0] - 2026-09-14
 
 First public release.

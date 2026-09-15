@@ -78,6 +78,18 @@ function uuidv7() {
 
 function hexId(bytes = 4) { return crypto.randomBytes(bytes).toString('hex'); }
 
+// OpenAI Responses API requires tool call ids to match [A-Za-z0-9_-] and be <= 64 chars.
+// Pi stores composite ids like "call_xxx|fc_yyy" (83 chars) which trips a 400 on resume.
+// Normalize deterministically so a call and its output still pair up.
+function sanitizeCallId(id, prefix = 'call_') {
+  let s = id == null ? '' : String(id);
+  if (s.includes('|')) s = s.split('|')[0];
+  s = s.replace(/[^A-Za-z0-9_-]/g, '');
+  if (!s) s = prefix + hexId(12);
+  if (s.length > 64) s = s.slice(0, 64);
+  return s;
+}
+
 function nowIso() { return new Date().toISOString(); }
 
 function isoMs(v) {
@@ -155,6 +167,6 @@ function safeJson(s) { try { return JSON.parse(s); } catch { return null; } }
 
 module.exports = {
   HOME, roots, walk, readLines, readJsonl, firstJson, ensureDir,
-  uuidv4, uuidv7, hexId, nowIso, isoMs, anyMs, msToIso, fmtTime,
+  uuidv4, uuidv7, hexId, nowIso, isoMs, anyMs, msToIso, fmtTime, sanitizeCallId,
   claudeProjectKey, piSessionDirName, piFileStamp, newIR, textOf, safeJson, winCwd,
 };
