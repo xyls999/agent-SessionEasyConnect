@@ -51,11 +51,15 @@ function codexRead(id) {
     const nid = p.id || `ord_${l.ordinal}`;
     if (p.type === 'message') {
       const role = p.role === 'developer' ? 'system' : p.role;
-      const parts = (p.content || []).map((c) => {
+      let parts = (p.content || []).map((c) => {
         if (c.type === 'input_text' || c.type === 'output_text') return { type: 'text', text: c.text || '' };
         if (c.type === 'input_image') return { type: 'image', mime: 'image', data: c.image_url || c.data || '' };
         return { type: 'meta', raw: c };
       }).filter((x) => x.type !== 'meta' || x.raw);
+      // Codex injects a synthetic <environment_context> user message; drop it so an
+      // imported transcript starts with the real user turn.
+      if (role === 'user') parts = parts.filter((x) => !(x.type === 'text' && /^<environment_context>/.test(String(x.text || '').trim())));
+      if (!parts.length) continue;
       msgs.push({ id: nid, parent_id: prevId, role, ts, model, parts });
       prevId = nid;
     } else if (p.type === 'reasoning') {

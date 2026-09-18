@@ -17,7 +17,12 @@ function injectNative(to, ir, opts) {
     const gen = render.genOpenCodeImport(ir);
     const out = opts.out || path.join(process.cwd(), gen.file);
     if (!opts.dryRun) { U.ensureDir(path.dirname(out)); fs.writeFileSync(out, gen.content); }
-    return { action: 'native', target: 'opencode', file: out, sid: gen.sid, hint: `opencode import "${out}"`, wrote: !opts.dryRun };
+    const cwd = ir.cwd || process.cwd();
+    return {
+      action: 'native', target: 'opencode', file: out, sid: gen.sid, wrote: !opts.dryRun,
+      hint: `opencode import "${out}"`,
+      note: `run that from the session directory (${cwd}) — opencode files the session under the directory you run import from`,
+    };
   }
   const gen = to === 'codex' ? render.genCodex(ir) : to === 'pi' ? render.genPi(ir) : render.genClaude(ir);
   const abs = path.join(STORE[to](), gen.relPath);

@@ -3,6 +3,26 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](https://semver.org/).
 
+## [1.0.3] - 2026-09-16
+
+### Fixed
+- **Codex → OpenCode injection.** `opencode import` rejected the generated file in several
+  ways; the OpenCode generator now matches its schema:
+  - only `user` / `assistant` messages are emitted (Codex `developer`/`system` messages are
+    dropped; `tool_result` is merged into the matching `tool` part of the preceding
+    assistant message instead of becoming its own message);
+  - every assistant message carries a `parentID`; if the transcript would start with an
+    assistant turn a placeholder user message is synthesized so the import stays valid;
+  - tool `state.input` is always an object (Codex `custom_tool_call` carries JS source as a
+    string, wrapped as `{ raw: ... }`) and `state.title` / `metadata` / `time` are always set;
+  - `info.directory` is normalized to forward slashes.
+- **Codex reader**: the synthetic `<environment_context>` user message is filtered out, so
+  imported transcripts start with the real user turn.
+- **Docs / UX**: `opencode import` must be run **from the session's directory**. OpenCode
+  assigns the project/directory from the command's cwd (not from `info.directory`), so
+  running it elsewhere files the session under the wrong project and it will not show up.
+  The injector's hint/note now says this explicitly.
+
 ## [1.0.2] - 2026-09-15
 
 ### Fixed

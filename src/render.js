@@ -251,30 +251,84 @@ function genClaude(ir) {
 function genOpenCodeImport(ir) {
   const sid = `ses_${U.hexId(6)}${base62(14)}`;
   const created = ir.created_at || Date.now();
+  const cwd = String(ir.cwd || process.cwd()).replace(/^\\\\\?\\/, '').replace(/\\/g, '/');
   const info = {
-    id: sid, slug: 'imported-session', projectID: 'global', directory: ir.cwd || process.cwd(),
+    id: sid, slug: 'imported-session', projectID: 'global', directory: cwd,
     path: 'session', title: ir.title || `Imported from ${ir.agent}`,
     agent: 'build', model: { id: ir.model || 'imported', providerID: 'imported' },
     version: '1.18.30', time: { created, updated: ir.updated_at || created },
   };
-  let parent = null;
-  const messages = ir.messages.map((m) => {
+
+  // opencode's import schema only accepts role "user" or "assistant" (no system/tool
+  // messages), and tool calls/results belong to a single `tool` part with a `state`
+  // machine. Drop system/developer messages and merge tool_result into the matching
+  // tool_call part of the preceding assistant message.
+  const messages = [];
+  let lastUserId = null;
+  const toolIndex = new Map();
+  const partBase = (mid) => ({ id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid });
+  // opencode requires tool state.input to be an object; Codex custom_tool_call carries JS
+  // source as a string, so wrap non-object inputs.
+  const asObject = (v) => (v && typeof v === 'object' && !Array.isArray(v)) ? v : { raw: v == null ? '' : String(v) };
+  const toolTitle = (p) => {
+    const i = p.input;
+    const guess = (i && typeof i === 'object' && !Array.isArray(i)) ? (i.command || i.cmd || i.path || i.file_path || i.query || i.url) : i;
+    const s = guess == null ? '' : String(guess);
+    return (s || p.name || 'tool').replace(/\s+/g, ' ').slice(0, 200);
+  };
+  const toolState = (p, m, input, output, isError) => ({
+    status: isError ? 'error' : 'completed',
+    input,
+    output,
+    title: toolTitle(p),
+    metadata: {},
+    time: { start: m.ts || created, end: m.ts || created },
+  });
+  // opencode requires every assistant message to carry a parentID pointing at a user
+  // message. If the transcript starts with an assistant turn (e.g. the synthetic
+  // <environment_context> user message was filtered out), synthesize a placeholder user.
+  const ensureUser = () => {
+    if (lastUserId) return;
+    const pmid = `msg_${U.hexId(6)}${base62(14)}`;
+    messages.push({
+      info: { id: pmid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: 'imported', modelID: ir.model || 'imported' }, summary: { diffs: [] } },
+      parts: [{ ...partBase(pmid), type: 'text', text: ir.title || '(imported session)' }],
+    });
+    lastUserId = pmid;
+  };
+
+  for (const m of ir.messages) {
+    const role = (m.role === 'user') ? 'user' : (m.role === 'assistant' || m.role === 'tool') ? 'assistant' : null;
+    if (!role) continue;
+
     const mid = `msg_${U.hexId(6)}${base62(14)}`;
     const parts = [];
     for (const p of (m.parts || [])) {
-      const baseP = { id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid };
-      if (p.type === 'text') parts.push({ ...baseP, type: 'text', text: p.text });
-      else if (p.type === 'reasoning') parts.push({ ...baseP, type: 'reasoning', text: p.text || '' });
-      else if (p.type === 'tool_call') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: U.sanitizeCallId(p.id), state: { status: 'completed', input: p.input == null ? {} : p.input, output: '' } });
-      else if (p.type === 'tool_result') parts.push({ ...baseP, type: 'tool', tool: p.name || 'tool', callID: U.sanitizeCallId(p.id), state: { status: p.is_error ? 'error' : 'completed', input: {}, output: String(p.output == null ? '' : p.output) } });
+      if (p.type === 'text' && p.text) parts.push({ ...partBase(mid), type: 'text', text: p.text });
+      else if (p.type === 'reasoning' && p.text) parts.push({ ...partBase(mid), type: 'reasoning', text: p.text });
+      else if (p.type === 'image') parts.push({ ...partBase(mid), type: 'file', mime: p.mime || 'image/png', filename: 'image', url: p.data || '' });
+      else if (p.type === 'tool_call') {
+        const callID = U.sanitizeCallId(p.id);
+        const part = { ...partBase(mid), type: 'tool', tool: p.name || 'tool', callID, state: toolState(p, m, asObject(p.input), '', false) };
+        parts.push(part);
+        toolIndex.set(callID, part);
+      } else if (p.type === 'tool_result') {
+        const callID = U.sanitizeCallId(p.id);
+        const output = String(p.output == null ? '' : p.output);
+        const found = toolIndex.get(callID);
+        if (found) { found.state.output = output; found.state.status = p.is_error ? 'error' : 'completed'; }
+        else parts.push({ ...partBase(mid), type: 'tool', tool: p.name || 'tool', callID, state: toolState(p, m, {}, output, p.is_error) });
+      }
     }
-    const role = m.role === 'tool' ? 'user' : m.role;
+    if (!parts.length) continue; // e.g. a tool-result message already merged upward
+
     const minfo = { id: mid, sessionID: sid, role, agent: 'build', time: { created: m.ts || created } };
     if (role === 'assistant') {
+      ensureUser();
       Object.assign(minfo, {
-        parentID: parent || undefined,
+        parentID: lastUserId,
         mode: 'build',
-        path: { cwd: ir.cwd || process.cwd(), root: '/' },
+        path: { cwd, root: '/' },
         cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         modelID: m.model || ir.model || 'imported',
@@ -287,9 +341,18 @@ function genOpenCodeImport(ir) {
         summary: { diffs: [] },
       });
     }
-    if (role === 'user' || role === 'assistant') parent = mid;
-    return { info: minfo, parts };
-  });
+    if (role === 'user') lastUserId = mid;
+    messages.push({ info: minfo, parts });
+  }
+
+  if (!messages.length) {
+    const mid = `msg_${U.hexId(6)}${base62(14)}`;
+    messages.push({
+      info: { id: mid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: 'imported', modelID: ir.model || 'imported' }, summary: { diffs: [] } },
+      parts: [{ id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid, type: 'text', text: ir.title || '(empty)' }],
+    });
+  }
+
   return { content: JSON.stringify({ info, messages }, null, 2), sid, file: `${sid}.json` };
 }
 

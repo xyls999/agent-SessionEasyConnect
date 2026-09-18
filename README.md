@@ -120,10 +120,15 @@ Each target needs different handling to actually read the injected session.
 **→ OpenCode**
 - Generates an import JSON (`{info, messages:[{info,parts}]}`); import it with:
   ```powershell
+  cd <session cwd>
   opencode import .\import.json
   ```
-- Every `message.info` needs an `agent` field (otherwise `opencode import` fails with
-  `Missing key at ["agent"]`).
+- **Run `opencode import` from the session's directory.** OpenCode files the session under the
+  project/directory of the *command's cwd* (not from `info.directory`); running it elsewhere
+  puts the session in the wrong project and it will not appear where you expect.
+- The generator only emits `user`/`assistant` messages (system/developer dropped, tool results
+  merged into the assistant's `tool` part), guarantees `parentID` on assistant messages, wraps
+  non-object tool inputs, and sets `state.title`/`metadata`/`time` to satisfy OpenCode's schema.
 
 ### What each injection adds / processes
 
@@ -132,7 +137,7 @@ Each target needs different handling to actually read the injected session.
 | **Codex** | `session_meta`; per-turn `turn_context`+`task_started`/`task_complete`; **Responses + typed layers**; `state_5.threads` row | cwd → `\\?\E:\...`; register metadata; restart Codex; async projection |
 | **Pi** | `session` header (version 3), `model_change`, message records | cwd dir encoding, filename timestamp escaping, standalone `toolResult`, 8-hex id chain |
 | **Claude Code** | per-record envelope (`sessionId`/`cwd`/`version`/`userType`) | cwd sanitize (non-alnum→`-`, >200 → truncate+hash), `uuid`/`parentUuid` chain, tool_result inside user record |
-| **OpenCode** | import JSON `{info, messages:[{info,parts}]}` | `agent` on every message.info; assistant `parentID/mode/path/cost/tokens/modelID/providerID/finish` |
+| **OpenCode** | import JSON `{info, messages:[{info,parts}]}` | `agent` on every message.info; assistant needs `parentID/mode/path/cost/tokens/modelID/providerID/finish`; only user/assistant roles; tool `state.input` must be an object with `title`; **run `opencode import` inside the session cwd** |
 
 Full field-level details: [`docs/TECHNICAL-REPORT.md`](docs/TECHNICAL-REPORT.md).
 
