@@ -23,6 +23,7 @@
     "asb": "./src/cli.js"
   },
   "scripts": {
+    "test": "node --test test/*.test.js",
     "start": "node ./src/cli.js",
     "list": "node ./src/cli.js list",
     "skills": "node ./src/cli.js skills list",
@@ -44,6 +45,7 @@
   "license": "MIT",
   "files": [
     "src",
+    "test",
     "web",
     "docs",
     "README.md",

@@ -212,6 +212,8 @@ async function doInject(){
     const lines = [
       `target: <b>${esc(r.target)}</b> · action: ${esc(r.action)} · wrote: ${r.wrote}`,
       `file: <span class="arrowuse">${esc(r.file)}</span>`,
+      r.transcriptFile? `transcript: <span class="arrowuse">${esc(r.transcriptFile)}</span>`:'',
+      r.backup? `backup: <span class="arrowuse">${esc(r.backup)}</span>`:'',
       r.sid? `sid: <span class="arrowuse">${esc(r.sid)}</span>`:'',
       r.hint? `read it with: <span class="arrowuse">${esc(r.hint)}</span>`:'',
       r.register && (r.register.inserted || r.register.already) ? `codex metadata: ${r.register.inserted ? 'registered' : 'already present'}` : '',

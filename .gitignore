@@ -11,6 +11,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# local transcript archives / backups (may contain private history)
+.agent-session-bus/
+
 # local test artifacts
 *.tmp
 *.bak

@@ -119,20 +119,19 @@ function piRead(id) {
   });
   const msgs = [];
   let model = null, prevId = null;
-  for (const l of lines) {
-    if (l.type === 'model_change') { model = l.modelId || model; continue; }
-    if (l.type !== 'message') continue;
+  const appendMessage = (l) => {
     const m = l.message || {};
     const ts = U.isoMs(l.timestamp) || U.anyMs(m.timestamp);
+    const content = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : (m.content || []);
     if (m.role === 'toolResult') {
-      const out = (m.content || []).map((c) => c.text || '').join('');
+      const out = content.map((c) => c.text || '').join('');
       msgs.push({
         id: l.id, parent_id: l.parentId != null ? l.parentId : prevId, role: 'tool', ts, model,
         parts: [{ type: 'tool_result', id: m.toolCallId, name: m.toolName, output: out, is_error: !!m.isError }],
       });
     } else {
       const parts = [];
-      for (const c of (m.content || [])) {
+      for (const c of content) {
         if (c.type === 'text') parts.push({ type: 'text', text: c.text || '' });
         else if (c.type === 'thinking') parts.push({ type: 'reasoning', text: c.thinking || '', opaque: true });
         else if (c.type === 'toolCall') parts.push({ type: 'tool_call', id: c.id, name: c.name, input: c.arguments });
@@ -146,6 +145,33 @@ function piRead(id) {
       });
     }
     prevId = l.id;
+  };
+  for (let index = 0; index < lines.length; index++) {
+    const l = lines[index];
+    if (l.type === 'model_change') { model = l.modelId || model; continue; }
+    if (l.type === 'message') { appendMessage(l); continue; }
+    if (l.type !== 'compaction' || typeof l.summary !== 'string' || !l.summary.trim()) continue;
+    // Resolve legacy boundaries in ORIGINAL entries, including metadata. Never
+    // slice expanded msgs: earlier kept tails would be duplicated and old copied
+    // checkpoints could incorrectly supersede the newest source summary.
+    const keptIndex = lines.findIndex((entry) => entry.id === l.firstKeptEntryId);
+    const kept = keptIndex >= 0 && keptIndex < index ? lines.slice(keptIndex, index) : [];
+    msgs.push({ id: l.id, parent_id: l.parentId || prevId, role: 'assistant', ts: U.isoMs(l.timestamp), model, is_summary: true, parts: [{ type: 'text', text: l.summary }] });
+    prevId = l.id;
+    const appendRetained = (m, i, timestamp) => {
+      const message = m.role === 'compactionSummary' ? { role: 'user', content: `[Retained earlier checkpoint]\n${m.summary || ''}`, timestamp: m.timestamp } : m;
+      appendMessage({ id: `${l.id}_kept_${i}`, parentId: prevId, timestamp, message });
+    };
+    if (Array.isArray(l.retainedTail)) {
+      l.retainedTail.forEach((m, i) => appendRetained(m, i, l.timestamp));
+    } else {
+      kept.forEach((entry, i) => {
+        if (entry.type === 'message') appendRetained(entry.message, i, entry.timestamp);
+        else if (entry.type === 'compaction') appendRetained({ role: 'compactionSummary', summary: entry.summary }, i, entry.timestamp);
+        else if (entry.type === 'branch_summary') appendRetained({ role: 'user', content: `[Retained branch summary]\n${entry.summary || ''}` }, i, entry.timestamp);
+        else if (entry.type === 'custom_message') appendRetained({ role: 'user', content: entry.content || '' }, i, entry.timestamp);
+      });
+    }
   }
   ir.messages = msgs;
   ir.model = model || (msgs.find((m) => m.model) || {}).model || null;
@@ -306,6 +332,7 @@ function ocRead(id) {
       return {
         id: m.id, parent_id: data.parentID || null, role: data.role, ts: m.time_created,
         model: data.modelID || (data.model && data.model.modelID) || null, parts: flat,
+        ...(data.role === 'assistant' && data.summary === true && data.finish === 'stop' && !data.error && flat.some((p) => p.type === 'text' && p.text.trim()) ? { is_summary: true } : {}),
       };
     });
     return ir;

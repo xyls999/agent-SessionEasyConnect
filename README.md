@@ -77,8 +77,12 @@ asec inject --from pi:<uuid>      --to claude   --mode native
 asec inject --from pi:<uuid>      --to opencode --out .\import.json
 opencode import .\import.json
 
-# context: append a Markdown transcript to AGENTS.md / CLAUDE.md instead
+# context: archive the full transcript and add a short reference to AGENTS.md / CLAUDE.md
 asec inject --from codex:<uuid> --to claude --mode context --cwd E:\myproject
+
+# migrate previously appended histories (makes a backup before rewriting)
+asec repair-context --cwd E:\myproject --dry-run
+asec repair-context --cwd E:\myproject
 
 # preview without writing
 asec inject --from codex:<uuid> --to pi --mode native --dry-run
@@ -86,6 +90,30 @@ asec inject --from codex:<uuid> --to pi --mode native --dry-run
 
 `--from` accepts `<agent>:<id>` or `--from <agent> --id <id>`; the id may be a full id
 or any unique substring.
+
+### Safe context mode
+
+Full transcripts are saved under `<cwd>/.agent-session-bus/context/`. Only a small
+reference is written to `AGENTS.md` (or `CLAUDE.md`). The target can read that archive
+with file tools when needed; the entire history is **not** automatically loaded as
+system instructions. Tool inputs and outputs are retained without preview truncation.
+Reimporting a session replaces its reference instead of appending duplicates; older
+snapshots remain in the archive.
+
+`asec repair-context --cwd DIR` moves legacy imported blocks into the same archive,
+deduplicates their references and preserves ordinary project instructions. Changed
+existing context files are backed up byte-for-byte under `.agent-session-bus/backups/`.
+Use `--to claude` to repair `CLAUDE.md`; the other targets share `AGENTS.md`.
+`--dry-run` never writes files. Malformed/unclosed blocks are rejected by default;
+`--recover` explicitly permits archiving them up to the next import marker or EOF.
+Review the backup when using recovery, since unmarked trailing text may belong to the
+unfinished transcript. New injections also migrate well-formed legacy blocks.
+
+**Restart the target agent** after repair (or `/reload` in Pi) to rebuild the system
+prompt. `/compact` cannot shrink an oversized `AGENTS.md`: conversation compaction
+and project instructions are different inputs. Do not load an archive as a system
+prompt. Archives may contain sensitive history; exclude `.agent-session-bus/` from
+version control unless you have reviewed its contents.
 
 ### Enable flow (per target)
 
@@ -110,7 +138,26 @@ Each target needs different handling to actually read the injected session.
 **→ Pi**
 - Writes `~/.pi/agent/sessions/<cwd-encoded>/<ts>_<uuid>.jsonl` (session header + messages
   + `toolResult` messages, 8-hex ids, `parentId` chain).
-- Read it with: `pi --session <sid>` (resumes) or `pi --export <file> out.html` (read-only).
+- Tool results are emitted separately even when OpenCode stores them inline in an
+  assistant message. Call IDs are paired and made portable; missing source tool names
+  are recovered from the call. Orphan results are preserved as historical text.
+- Source model metadata is kept in a `custom` entry, **not** a fake `imported` model
+  selection. Resume uses your configured Pi model.
+- Successful OpenCode compaction summaries become real Pi `compaction` checkpoints;
+  earlier messages/tool outputs remain on disk, but only the newest summary and
+  its following context are replayed. Pi-source checkpoints and retained tails also
+  survive reinjection. Failed/pending summaries are not used as checkpoints.
+- Before writing, Pi native injection checks the **actual target cwd**, its loaded
+  ancestors and the Pi agent directory. Legacy marked histories in loaded instruction
+  files are archived/backed up as in context mode. File precedence and nested-worktree
+  shadow exclusions follow Pi; unrelated/unmarked rules are never truncated.
+- Native injection refuses an estimated active context above 8,000,000 characters or
+  loaded project instructions above 800,000 characters. Compact the source first or
+  use context mode; these conservative guards do not replace provider token limits.
+  `--dry-run` previews repairs without writing. Already-created sessions must be
+  reimported to gain the checkpoints; restart Pi to clear cached instructions.
+- Read it from the session's cwd with `pi --session <sid>`, or pass the full JSONL path.
+  `pi --export <file> out.html` is read-only.
 
 **→ Claude Code**
 - Writes `~/.claude/projects/<sanitized-cwd>/<uuid>.jsonl` (records with `uuid`/`parentUuid`,
@@ -135,7 +182,7 @@ Each target needs different handling to actually read the injected session.
 | Target | Must add | Must process |
 |---|---|---|
 | **Codex** | `session_meta`; per-turn `turn_context`+`task_started`/`task_complete`; **Responses + typed layers**; `state_5.threads` row | cwd → `\\?\E:\...`; register metadata; restart Codex; async projection |
-| **Pi** | `session` header (version 3), `model_change`, message records | cwd dir encoding, filename timestamp escaping, standalone `toolResult`, 8-hex id chain |
+| **Pi** | `session` header (version 3), source metadata `custom` entry, message records | cwd dir encoding, filename timestamp escaping, standalone `toolResult`, 8-hex id chain |
 | **Claude Code** | per-record envelope (`sessionId`/`cwd`/`version`/`userType`) | cwd sanitize (non-alnum→`-`, >200 → truncate+hash), `uuid`/`parentUuid` chain, tool_result inside user record |
 | **OpenCode** | import JSON `{info, messages:[{info,parts}]}` | `agent` on every message.info; assistant needs `parentID/mode/path/cost/tokens/modelID/providerID/finish`; only user/assistant roles; tool `state.input` must be an object with `title`; **run `opencode import` inside the session cwd** |
 
@@ -168,6 +215,7 @@ holding many skills; `--force` overwrites an existing skill.
 asec list   [--agent codex|pi|claude|opencode] [--json]
 asec show   <agent> <sessionId> [--format text|markdown|canonical]
 asec roots
+asec repair-context [--cwd DIR] [--to pi|codex|claude|opencode] [--dry-run] [--recover]
 asec inject --from <agent>:<id> --to <agent> [--mode native|context]
             [--out FILE] [--cwd DIR] [--dry-run] [--no-register]
 asec skills list|roots|install|sync ...
@@ -216,11 +264,37 @@ src/adapters.js        Codex / Pi / Claude / OpenCode readers -> canonical IR
 src/render.js          IR -> text/markdown; IR -> native (codex / pi / claude / opencode-import)
 src/codex-register.js  write the Codex state_5.sqlite `threads` row
 src/inject.js          native / context injection, dry-run
+src/context.js         transcript archives, short references, legacy repair + backups
 src/skills.js          skill roots, list, install, sync
 src/cli.js             list / show / roots / inject / skills / tui / web
 src/server.js + web/   local web UI (browse, inject, verify)
 src/tui.js             terminal UI
 ```
+
+## Tests
+
+```powershell
+npm test
+```
+
+Tests use temporary session stores and context files, not your live histories. They
+cover large context imports, backups/recovery/deduplication, native tool-result
+conversion, source compaction boundaries/retained tails, instruction-file discovery,
+Pi string-content reading and web injection error handling.
+
+Optional integration contract (requires an installed Pi package):
+
+```powershell
+node test/pi-request-contract.cjs "<pi-coding-agent-install-dir>"
+# optionally validate a real source session, without modifying it:
+node test/pi-request-contract.cjs "<pi-coding-agent-install-dir>" opencode:<session-id>
+```
+
+This uses Pi's real session manager, compaction implementation and Codex request
+builder against a **local mock SSE response**, checks final request-field sizes and
+active tool pairing, and verifies full historical outputs remain on disk. It makes
+no remote inference request and never persists the mock summaries; it is not an
+authentication, network or live-model success test.
 
 ## Roadmap
 

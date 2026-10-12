@@ -3,6 +3,30 @@
 All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Context imports no longer append full/duplicate histories to `AGENTS.md` or
+  `CLAUDE.md`, which could exceed Codex's instructions limit and could not be repaired
+  by conversation compaction. Full transcripts are archived with short references.
+- Added `repair-context` with dry-run, exact backups, deduplication and explicit
+  recovery for unfinished legacy import blocks.
+- OpenCode inline tool results are preserved in native Pi and Claude sessions, with
+  correct message ordering. Pi tool IDs/names are paired and made portable; imports
+  no longer select a nonexistent `imported` provider/model.
+- Successful OpenCode compaction summaries become native Pi checkpoints, preserving
+  full historical records without replaying the entire pre-compaction transcript.
+  Pi-source compactions retain their original tail boundaries (including metadata)
+  without allowing copied older summaries to supersede the newest checkpoint.
+- Native Pi injection checks loaded cwd/ancestor/global instruction files, archives
+  legacy imports with exact backups and respects override/worktree shadow precedence.
+  Oversized unmarked rules or active histories are rejected instead of truncated.
+- Pi reader preserves native string-content messages instead of splitting them into
+  character-sized metadata parts.
+- Web injection failures now return JSON errors instead of escaping as rejected promises.
+- Added regression tests (`npm test`) and an optional installed-Pi request contract
+  using real compaction/request construction with local mock SSE, not remote inference.
+
 ## [1.0.3] - 2026-09-16
 
 ### Fixed

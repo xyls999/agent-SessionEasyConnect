@@ -37,7 +37,7 @@ function toText(ir) {
   return out.join('\n');
 }
 
-function toMarkdown(ir) {
+function toMarkdown(ir, opts = {}) {
   const out = [];
   out.push(`# Imported session (${ir.agent})`);
   out.push('');
@@ -53,8 +53,8 @@ function toMarkdown(ir) {
     for (const p of m.parts) {
       if (p.type === 'text' && p.text) { out.push('', `**${m.role}:**`, '', p.text); }
       else if (p.type === 'reasoning') { out.push('', `**${m.role} (reasoning):**`, '', p.text ? p.text : '_[omitted]_'); }
-      else if (p.type === 'tool_call') { out.push('', `**tool_call \`${p.name || '?'}\`:**`, '', '```json', jsonShort(p.input, 1200), '```'); }
-      else if (p.type === 'tool_result') { out.push('', `**tool_result${p.is_error ? ' (error)' : ''}:**`, '', '```', clip(p.output, 1600), '```'); }
+      else if (p.type === 'tool_call') { out.push('', `**tool_call \`${p.name || '?'}\`:**`, '', '```json', jsonShort(p.input, opts.full ? Infinity : 1200), '```'); }
+      else if (p.type === 'tool_result') { out.push('', `**tool_result${p.is_error ? ' (error)' : ''}:**`, '', '```', clip(p.output, opts.full ? Infinity : 1600), '```'); }
       else if (p.type === 'image') out.push('', `**${m.role}:** _[image]_`);
     }
   }
@@ -162,43 +162,104 @@ function genCodex(ir) {
   return { relPath: path.join(dir, file), content: lines.join('\n') + '\n', sid: id };
 }
 
-function genPi(ir) {
+function genPi(ir, opts = {}) {
   const id = U.uuidv7();
   const iso = U.nowIso();
   const dir = path.join('sessions', U.piSessionDirName(ir.cwd || process.cwd()));
   const file = `${U.piFileStamp(iso)}_${id}.jsonl`;
   const lines = [];
   let prev = null;
-  const rec = (obj) => { obj.id = U.hexId(4); obj.parentId = prev; obj.timestamp = obj.timestamp || U.nowIso(); lines.push(JSON.stringify(obj)); prev = obj.id; };
-  lines.push(JSON.stringify({ type: 'session', version: 3, id, timestamp: iso, cwd: ir.cwd || process.cwd() }));
-  prev = null;
-  rec({ type: 'model_change', provider: 'imported', modelId: ir.model || 'imported' });
+  const rec = (obj) => { obj.id = U.hexId(4); obj.parentId = prev; obj.timestamp = obj.timestamp || U.nowIso(); lines.push(obj); prev = obj.id; return obj; };
+  lines.push({ type: 'session', version: 3, id, timestamp: iso, cwd: ir.cwd || process.cwd() });
+  let activeCharacters = 0;
+  let pendingCheckpoint = null;
+  let checkpoints = 0;
+  // The source model/provider may not exist in Pi. Keep provenance without selecting
+  // a fake model; Pi will resume with the user's configured model.
+  rec({ type: 'custom', customType: 'agent-session-bus', data: { agent: ir.agent, sessionId: ir.session_id, model: ir.model || null } });
+  const calls = new Map();
+  const missingIds = [];
+  const usedIds = new Set();
+  const newCall = (p) => {
+    let callId = U.sanitizeCallId(p.id);
+    if (usedIds.has(callId)) callId = callId.slice(0, 47) + '_' + U.hexId(8);
+    usedIds.add(callId);
+    const call = { id: callId, name: p.name || 'tool' };
+    if (p.id != null) calls.set(String(p.id), call);
+    else missingIds.push(call);
+    return call;
+  };
   for (const m of ir.messages) {
-    if (m.role === 'tool') {
-      for (const p of (m.parts || [])) {
-        if (p.type !== 'tool_result') continue;
-        rec({
-          type: 'message', timestamp: U.msToIso(m.ts) || undefined,
-          message: { role: 'toolResult', toolCallId: p.id || `call_${base62(12)}`, toolName: p.name || 'tool', content: [{ type: 'text', text: String(p.output == null ? '' : p.output) }], isError: !!p.is_error, timestamp: m.ts || Date.now() },
-        });
+    let content = [];
+    const timestamp = m.ts || Date.now();
+    const emit = (message) => {
+      const entry = rec({ type: 'message', timestamp: U.msToIso(m.ts) || undefined, message: { ...message, timestamp } });
+      if (pendingCheckpoint) { pendingCheckpoint.firstKeptEntryId = entry.id; pendingCheckpoint = null; }
+      // Conservative character budget for the eventual single-text summary request:
+      // JSON escaping in tool arguments plus text/thinking/results and role labels.
+      activeCharacters += 128 + JSON.stringify(message.content || []).length;
+    };
+    const flush = () => {
+      if (!content.length) return;
+      const role = m.role === 'assistant' ? 'assistant' : 'user';
+      const msg = { role, content };
+      if (role === 'assistant') {
+        Object.assign(msg, { api: 'openai-responses', provider: 'imported', model: m.model || ir.model || 'imported', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: content.some((c) => c.type === 'toolCall') ? 'toolUse' : 'stop' });
       }
-      continue;
-    }
-    const content = [];
+      emit(msg);
+      content = [];
+    };
     for (const p of (m.parts || [])) {
-      if (p.type === 'text') content.push({ type: 'text', text: p.text });
-      else if (p.type === 'reasoning') content.push({ type: 'thinking', thinking: p.text || '' });
-      else if (p.type === 'tool_call') content.push({ type: 'toolCall', id: p.id || `call_${base62(12)}`, name: p.name || 'tool', arguments: p.input == null ? {} : p.input });
-      else if (p.type === 'image') content.push({ type: 'image', data: p.data || '', mimeType: p.mime || 'image/png' });
+      if (p.type === 'text') content.push({ type: 'text', text: m.role === 'system' ? `[Imported system context]\n${p.text || ''}` : (p.text || '') });
+      else if (p.type === 'reasoning' && m.role === 'assistant') content.push({ type: 'thinking', thinking: p.text || '' });
+      else if (p.type === 'tool_call') {
+        const call = newCall(p);
+        const input = p.input == null ? {} : p.input;
+        content.push({ type: 'toolCall', id: call.id, name: call.name, arguments: input && typeof input === 'object' && !Array.isArray(input) ? input : { raw: input } });
+      } else if (p.type === 'tool_result') {
+        // OpenCode stores the result in the same assistant part as the call. Pi
+        // requires a separate toolResult message regardless of the source role.
+        flush();
+        let call = p.id != null ? calls.get(String(p.id)) : null;
+        if (!call && p.id == null) {
+          const candidates = missingIds.filter((c) => !p.name || c.name === p.name);
+          if (candidates.length === 1) { call = candidates[0]; missingIds.splice(missingIds.indexOf(call), 1); }
+        }
+        const output = String(p.output == null ? '' : p.output);
+        if (call) {
+          emit({ role: 'toolResult', toolCallId: call.id, toolName: p.name || call.name, content: [{ type: 'text', text: output }], isError: !!p.is_error });
+        } else {
+          // An orphan output must not be sent as an API tool response with no call.
+          emit({ role: 'user', content: [{ type: 'text', text: `[Imported tool result: ${p.name || 'tool'}${p.is_error ? ' (error)' : ''}]\n${output}` }] });
+        }
+      } else if (p.type === 'image') content.push({ type: 'image', data: p.data || '', mimeType: p.mime || 'image/png' });
     }
-    if (!content.length) continue;
-    const msg = { role: m.role === 'user' ? 'user' : 'assistant', content, timestamp: m.ts || Date.now() };
-    if (msg.role === 'assistant') {
-      Object.assign(msg, { api: 'openai-responses', provider: 'imported', model: m.model || ir.model || 'imported', usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: 'stop' });
+    flush();
+    if (m.is_summary) {
+      const summary = (m.parts || []).filter((p) => p.type === 'text').map((p) => p.text || '').join('\n').trim();
+      if (summary) {
+        const entry = rec({ type: 'compaction', summary, tokensBefore: Math.ceil(activeCharacters / 4), fromHook: true, details: { sourceAgent: ir.agent, sourceMessageId: m.id || null } });
+        // The next emitted message becomes the kept boundary. If there is no next
+        // message, the checkpoint itself denotes an empty tail (legacy Pi compatible).
+        entry.firstKeptEntryId = entry.id;
+        pendingCheckpoint = entry;
+        activeCharacters = summary.length + 256;
+        checkpoints++;
+      }
     }
-    rec({ type: 'message', timestamp: U.msToIso(m.ts) || undefined, message: msg });
   }
-  return { relPath: path.join(dir, file), content: lines.join('\n') + '\n', sid: id };
+  // Imported histories can be much larger than a normal live context. Refuse an
+  // unsafe active span instead of writing a session whose first auto-compaction
+  // exceeds the Responses API 10 Mi-character single-text limit. Never truncate it.
+  if (activeCharacters > 8000000) {
+    throw new Error(`Pi active context is too large (${activeCharacters} estimated characters after ${checkpoints} checkpoint(s)); use --mode context to archive it, or compact the source before native injection`);
+  }
+  // Pi also infers a saved model from assistant records. Select the configured
+  // target AFTER the imported history so foreign assistant metadata cannot win.
+  if (typeof opts.provider === 'string' && opts.provider && typeof opts.model === 'string' && opts.model) {
+    rec({ type: 'model_change', provider: opts.provider, modelId: opts.model });
+  }
+  return { relPath: path.join(dir, file), content: lines.map((r) => JSON.stringify(r)).join('\n') + '\n', sid: id, activeCharacters, checkpoints };
 }
 
 function genClaude(ir) {
@@ -209,18 +270,13 @@ function genClaude(ir) {
   const lines = [];
   let prevUuid = null;
   const base = () => ({ parentUuid: prevUuid, logicalParentUuid: undefined, isSidechain: false, userType: 'external', cwd, sessionId: id, version: '2.1.270', gitBranch: '', type: 'user', uuid: U.uuidv4(), timestamp: U.nowIso() });
+  const callIds = new Map();
+  let lastMissingId = null;
+  const emit = (r, m) => {
+    if (m.ts) r.timestamp = U.msToIso(m.ts);
+    lines.push(JSON.stringify(r)); prevUuid = r.uuid;
+  };
   for (const m of ir.messages) {
-    if (m.role === 'tool') {
-      for (const p of (m.parts || [])) {
-        if (p.type !== 'tool_result') continue;
-        const r = base();
-        r.type = 'user';
-        r.message = { role: 'user', content: [{ type: 'tool_result', tool_use_id: U.sanitizeCallId(p.id, 'toolu_'), content: [{ type: 'text', text: String(p.output == null ? '' : p.output) }], is_error: !!p.is_error }] };
-        if (m.ts) r.timestamp = U.msToIso(m.ts);
-        lines.push(JSON.stringify(r)); prevUuid = r.uuid;
-      }
-      continue;
-    }
     if (m.role === 'system') {
       const r = base(); r.type = 'system'; r.subtype = 'injected';
       r.content = (m.parts || []).map((p) => p.text || '').join('\n');
@@ -228,22 +284,38 @@ function genClaude(ir) {
       lines.push(JSON.stringify(r)); prevUuid = r.uuid;
       continue;
     }
-    const r = base();
-    r.type = m.role === 'user' ? 'user' : 'assistant';
-    if (r.type === 'user') {
-      const text = (m.parts || []).filter((p) => p.type === 'text').map((p) => p.text).join('\n');
-      r.message = { role: 'user', content: text };
-    } else {
-      const content = [];
-      for (const p of (m.parts || [])) {
-        if (p.type === 'text') content.push({ type: 'text', text: p.text });
-        else if (p.type === 'tool_call') content.push({ type: 'tool_use', id: U.sanitizeCallId(p.id, 'toolu_'), name: p.name || 'tool', input: p.input == null ? {} : p.input });
+    let content = [];
+    const flush = () => {
+      if (!content.length) return;
+      const r = base();
+      r.type = m.role === 'assistant' ? 'assistant' : 'user';
+      r.message = r.type === 'user'
+        ? { role: 'user', content: content.map((p) => p.text || '').join('\n') }
+        : { id: `msg_${base62(20)}`, type: 'message', role: 'assistant', model: m.model || ir.model || 'imported', content, stop_reason: content.some((p) => p.type === 'tool_use') ? 'tool_use' : 'end_turn' };
+      emit(r, m);
+      content = [];
+    };
+    for (const p of (m.parts || [])) {
+      if (p.type === 'text') content.push({ type: 'text', text: p.text || '' });
+      else if (p.type === 'tool_call') {
+        const callId = U.sanitizeCallId(p.id, 'toolu_');
+        if (p.id != null) callIds.set(String(p.id), callId);
+        else lastMissingId = callId;
+        const input = p.input == null ? {} : p.input;
+        content.push({ type: 'tool_use', id: callId, name: p.name || 'tool', input: input && typeof input === 'object' && !Array.isArray(input) ? input : { raw: input } });
+      } else if (p.type === 'tool_result') {
+        flush();
+        const callId = p.id != null ? callIds.get(String(p.id)) : lastMissingId;
+        if (p.id == null) lastMissingId = null;
+        const r = base();
+        const output = String(p.output == null ? '' : p.output);
+        r.message = callId
+          ? { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: [{ type: 'text', text: output }], is_error: !!p.is_error }] }
+          : { role: 'user', content: `[Imported tool result: ${p.name || 'tool'}]\n${output}` };
+        emit(r, m);
       }
-      if (!content.length) continue;
-      r.message = { id: `msg_${base62(20)}`, type: 'message', role: 'assistant', model: m.model || ir.model || 'imported', content, stop_reason: 'end_turn' };
     }
-    if (m.ts) r.timestamp = U.msToIso(m.ts);
-    lines.push(JSON.stringify(r)); prevUuid = r.uuid;
+    flush();
   }
   return { relPath: path.join(dir, file), content: lines.join('\n') + '\n', sid: id };
 }

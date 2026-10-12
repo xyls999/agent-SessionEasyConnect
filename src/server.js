@@ -68,7 +68,7 @@ function handler(req, res) {
       return readBody(req).then((b) => {
         const r = injector.inject({ fromAgent: b.fromAgent, fromId: b.fromId, to: b.to, mode: b.mode, cwd: b.cwd, dryRun: !!b.dryRun });
         sendJson(res, 200, r);
-      });
+      }).catch((e) => sendJson(res, 500, { error: String(e.message || e) }));
     }
     if (req.method === 'POST' && p === '/api/verify') {
       return readBody(req).then((b) => sendJson(res, 200, verify(b.to, b.sid, b.file)));

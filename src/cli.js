@@ -66,7 +66,7 @@ function cmdInject(o) {
   });
   console.log(JSON.stringify(res, null, 2));
   if (res.wrote && res.action === 'native') console.error(`\nWrote native ${res.target} session. Open it with:\n  ${res.hint}`);
-  if (res.wrote && res.action === 'context') console.error(`\nAppended transcript to ${res.file}. Start ${res.target} in that cwd and it will read it.`);
+  if (res.action === 'context') console.error(`\n${res.wrote ? 'Updated' : 'Preview/no change:'} ${res.file}. Transcript: ${res.transcriptFile}. Restart ${res.target} (or reload context files) to load the short reference.`);
 }
 
 function cmdSkills(o) {
@@ -108,6 +108,7 @@ Usage:
   asec list [--agent codex|pi|claude|opencode] [--json]
   asec show <agent> <sessionId> [--format text|markdown|canonical]
   asec roots
+  asec repair-context [--cwd DIR] [--to pi|codex|claude|opencode] [--dry-run] [--recover]
   asec inject --from <agent>:<sessionId> --to <agent> [--mode native|context] [--out FILE] [--cwd DIR] [--dry-run] [--no-register]
   asec skills list [--json]
   asec skills roots
@@ -143,6 +144,10 @@ function main() {
     if (cmd === 'list' || cmd === 'ls') return cmdList(o);
     if (cmd === 'show' || cmd === 'read') return cmdShow(o);
     if (cmd === 'roots') return cmdRoots();
+    if (cmd === 'repair-context') {
+      console.log(JSON.stringify(require('./context').repairContext({ cwd: o.cwd, to: o.to, dryRun: !!o['dry-run'], recover: !!o.recover }), null, 2));
+      return;
+    }
     if (cmd === 'skills' || cmd === 'skill') return cmdSkills(o);
     if (cmd === 'web' || cmd === 'serve') { require('./server').start(Number(o.port) || 8787); return; }
     if (cmd === 'tui' || cmd === 'ui') { require('./tui').main(); return; }

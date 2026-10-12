@@ -96,11 +96,16 @@ async function injectFlow(rl, ask, s) {
   if (mode === 'context') cwd = (await ask(`context cwd (回车=当前目录): `)).trim() || process.cwd();
   try {
     const r = injector.inject({ fromAgent: s.agent, fromId: s.id, to, mode, cwd });
-    console.log(`${C.green}✓ 已写入${C.reset} ${r.file}`);
+    console.log(`${C.green}✓ ${r.wrote ? '已写入' : '无变更'}${C.reset} ${r.file}`);
+    if (r.transcriptFile) console.log(`  完整会话: ${r.transcriptFile}`);
+    if (r.backup) console.log(`  原文件备份: ${r.backup}`);
+    if (r.note) console.log(`  ${r.note}`);
     if (r.hint) console.log(`  ${C.dim}读取: ${r.hint}${C.reset}`);
     reload();
-    const yn = (await ask(`现在验证 ${to} 能读出来吗? [y/N]: `)).trim().toLowerCase();
-    if (yn === 'y') await verifyFlow({ agent: to, id: r.sid }, r.file);
+    if (r.action === 'native') {
+      const yn = (await ask(`现在验证 ${to} 能读出来吗? [y/N]: `)).trim().toLowerCase();
+      if (yn === 'y') await verifyFlow({ agent: to, id: r.sid }, r.file);
+    }
   } catch (e) {
     console.log(`${C.red}注入失败: ${e.message}${C.reset}`);
   }
