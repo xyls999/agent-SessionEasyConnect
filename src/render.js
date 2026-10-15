@@ -355,6 +355,7 @@ function genOpenCodeImport(ir) {
     title: toolTitle(p),
     metadata: {},
     time: { start: m.ts || created, end: m.ts || created },
+    ...(isError ? { error: output } : {}),
   });
   // opencode requires every assistant message to carry a parentID pointing at a user
   // message. If the transcript starts with an assistant turn (e.g. the synthetic
@@ -377,7 +378,10 @@ function genOpenCodeImport(ir) {
     const parts = [];
     for (const p of (m.parts || [])) {
       if (p.type === 'text' && p.text) parts.push({ ...partBase(mid), type: 'text', text: p.text });
-      else if (p.type === 'reasoning' && p.text) parts.push({ ...partBase(mid), type: 'reasoning', text: p.text });
+      else if (p.type === 'reasoning' && p.text) {
+        const partTime = m.ts || created;
+        parts.push({ ...partBase(mid), type: 'reasoning', text: p.text, time: { start: partTime, end: partTime } });
+      }
       else if (p.type === 'image') parts.push({ ...partBase(mid), type: 'file', mime: p.mime || 'image/png', filename: 'image', url: p.data || '' });
       else if (p.type === 'tool_call') {
         const callID = U.sanitizeCallId(p.id);
@@ -388,8 +392,11 @@ function genOpenCodeImport(ir) {
         const callID = U.sanitizeCallId(p.id);
         const output = String(p.output == null ? '' : p.output);
         const found = toolIndex.get(callID);
-        if (found) { found.state.output = output; found.state.status = p.is_error ? 'error' : 'completed'; }
-        else parts.push({ ...partBase(mid), type: 'tool', tool: p.name || 'tool', callID, state: toolState(p, m, {}, output, p.is_error) });
+        if (found) {
+          found.state.output = output;
+          found.state.status = p.is_error ? 'error' : 'completed';
+          if (p.is_error) found.state.error = output;
+        } else parts.push({ ...partBase(mid), type: 'tool', tool: p.name || 'tool', callID, state: toolState(p, m, {}, output, p.is_error) });
       }
     }
     if (!parts.length) continue; // e.g. a tool-result message already merged upward

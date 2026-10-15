@@ -4,12 +4,27 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { genPi, genClaude, genCodex } = require('../src/render');
+const { genPi, genClaude, genCodex, genOpenCodeImport } = require('../src/render');
 const adapters = require('../src/adapters');
 
 const ir = (messages) => ({ agent: 'opencode', session_id: 'ses_source', cwd: 'E:/project', model: 'foreign-model', messages });
 const rows = (messages) => genPi(ir(messages)).content.trim().split('\n').map(JSON.parse);
 const messages = (input) => rows(input).filter((r) => r.type === 'message').map((r) => r.message);
+
+test('OpenCode reasoning parts include required time metadata for import', () => {
+  const output = JSON.parse(genOpenCodeImport(ir([{ role: 'user', ts: 1000, parts: [{ type: 'text', text: 'hello' }] }, { role: 'assistant', ts: 2000, parts: [{ type: 'reasoning', text: 'thinking' }] }])).content);
+  const reasoning = output.messages[1].parts.find((p) => p.type === 'reasoning');
+  assert.deepEqual(reasoning.time, { start: 2000, end: 2000 });
+});
+
+test('OpenCode errored tool parts include required error metadata', () => {
+  const output = JSON.parse(genOpenCodeImport(ir([{ role: 'user', ts: 1000, parts: [{ type: 'text', text: 'hello' }] }, { role: 'assistant', ts: 2000, parts: [
+    { type: 'tool_call', id: 'call_1', name: 'read', input: {} },
+    { type: 'tool_result', id: 'call_1', name: 'read', output: 'read failed', is_error: true },
+  ] }])).content);
+  const tool = output.messages[1].parts.find((p) => p.type === 'tool');
+  assert.equal(tool.state.error, 'read failed');
+});
 
 test('OpenCode inline tool results become standalone Pi messages in order', () => {
   const result = messages([{ role: 'assistant', parts: [
