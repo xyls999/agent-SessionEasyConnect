@@ -74,8 +74,12 @@ asec web --port 8787                 # local web UI -> http://127.0.0.1:8787/
 asec inject --from claude:<uuid>  --to codex    --mode native
 asec inject --from codex:<uuid>   --to pi       --mode native
 asec inject --from pi:<uuid>      --to claude   --mode native
-asec inject --from pi:<uuid>      --to opencode --out .\import.json
-opencode import .\import.json
+asec inject --from pi:<uuid>      --to opencode            # auto-runs `opencode import` in the session dir
+
+# opencode extras: --no-import (JSON only), --keep-file / --out FILE (keep the JSON backup)
+# (the JSON goes to the OS temp dir by default and is removed after a successful import)
+# --model provider/id binds the session's continue-chat model; by default asec auto-detects
+# the newest real provider/model from your local opencode store (never the phantom 'imported')
 
 # context: archive the full transcript and add a short reference to AGENTS.md / CLAUDE.md
 asec inject --from codex:<uuid> --to claude --mode context --cwd E:\myproject
@@ -165,14 +169,18 @@ Each target needs different handling to actually read the injected session.
 - Read it with: `claude --resume <uuid>` (or `--session-id <uuid>`).
 
 **→ OpenCode**
-- Generates an import JSON (`{info, messages:[{info,parts}]}`); import it with:
-  ```powershell
-  cd <session cwd>
-  opencode import .\import.json
-  ```
-- **Run `opencode import` from the session's directory.** OpenCode files the session under the
-  project/directory of the *command's cwd* (not from `info.directory`); running it elsewhere
-  puts the session in the wrong project and it will not appear where you expect.
+- Generates an import JSON (`{info, messages:[{info,parts}]}`) **and then automatically runs
+  `opencode import` from the session's own directory**, so the session is immediately readable
+  in OpenCode (result: `Imported session: ses_...`). The JSON is written to the OS temp dir and
+  deleted after success; use `--out FILE` or `--keep-file` to keep it, `--no-import` to skip
+  the automatic import. If the `opencode` CLI is missing or import fails, the JSON is kept and
+  the output falls back to the manual command.
+- **Import must run in the session's directory** (the automatic step does this). OpenCode files
+  the session under the project/directory of the *command's cwd* (not from `info.directory`);
+  running it elsewhere puts the session in the wrong project and it will not appear where you
+  expect.
+- Untitled sources (e.g. most Pi sessions) get a session title derived from the first user
+  message, so imports are findable instead of a pile of identical "Imported from pi" entries.
 - The generator only emits `user`/`assistant` messages (system/developer dropped, tool results
   merged into the assistant's `tool` part), guarantees `parentID` on assistant messages, wraps
   non-object tool inputs, and sets `state.title`/`metadata`/`time` to satisfy OpenCode's schema.
@@ -184,7 +192,7 @@ Each target needs different handling to actually read the injected session.
 | **Codex** | `session_meta`; per-turn `turn_context`+`task_started`/`task_complete`; **Responses + typed layers**; `state_5.threads` row | cwd → `\\?\E:\...`; register metadata; restart Codex; async projection |
 | **Pi** | `session` header (version 3), source metadata `custom` entry, message records | cwd dir encoding, filename timestamp escaping, standalone `toolResult`, 8-hex id chain |
 | **Claude Code** | per-record envelope (`sessionId`/`cwd`/`version`/`userType`) | cwd sanitize (non-alnum→`-`, >200 → truncate+hash), `uuid`/`parentUuid` chain, tool_result inside user record |
-| **OpenCode** | import JSON `{info, messages:[{info,parts}]}` | `agent` on every message.info; assistant needs `parentID/mode/path/cost/tokens/modelID/providerID/finish`; only user/assistant roles; tool `state.input` must be an object with `title`; **run `opencode import` inside the session cwd** |
+| **OpenCode** | import JSON `{info, messages:[{info,parts}]}` + auto `opencode import` in the session cwd | `agent` on every message.info; assistant needs `parentID/mode/path/cost/tokens/modelID/providerID/finish`; only user/assistant roles; tool `state.input` must be an object with `title`; the import **must run inside the session cwd** (done automatically) |
 
 Full field-level details: [`docs/TECHNICAL-REPORT.md`](docs/TECHNICAL-REPORT.md).
 

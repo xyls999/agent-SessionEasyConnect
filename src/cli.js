@@ -62,10 +62,13 @@ function cmdInject(o) {
   if (fromAgent && fromAgent.includes(':')) { const [a, b] = fromAgent.split(':'); fromAgent = a; fromId = b; }
   const res = injector.inject({
     fromAgent, fromId, to: o.to, mode: o.mode, out: o.out, cwd: o.cwd, dryRun: !!o['dry-run'],
-    register: !o['no-register'],
+    register: !o['no-register'], noImport: !!o['no-import'], keepFile: !!o['keep-file'], model: o.model,
   });
   console.log(JSON.stringify(res, null, 2));
-  if (res.wrote && res.action === 'native') console.error(`\nWrote native ${res.target} session. Open it with:\n  ${res.hint}`);
+  if (res.wrote && res.action === 'native') {
+    if (res.target === 'opencode' && res.imported) console.error(`\nImported into opencode: ${res.sid}\nOpen it with:\n  ${res.hint}`);
+    else console.error(`\nWrote native ${res.target} session. Open it with:\n  ${res.hint}`);
+  }
   if (res.action === 'context') console.error(`\n${res.wrote ? 'Updated' : 'Preview/no change:'} ${res.file}. Transcript: ${res.transcriptFile}. Restart ${res.target} (or reload context files) to load the short reference.`);
 }
 
@@ -109,7 +112,7 @@ Usage:
   asec show <agent> <sessionId> [--format text|markdown|canonical]
   asec roots
   asec repair-context [--cwd DIR] [--to pi|codex|claude|opencode] [--dry-run] [--recover]
-  asec inject --from <agent>:<sessionId> --to <agent> [--mode native|context] [--out FILE] [--cwd DIR] [--dry-run] [--no-register]
+  asec inject --from <agent>:<sessionId> --to <agent> [--mode native|context] [--out FILE] [--cwd DIR] [--dry-run] [--no-register] [--no-import] [--keep-file] [--model provider/id]
   asec skills list [--json]
   asec skills roots
   asec skills install <path-to-skill-or-folder> [--to all|codex,pi,claude,opencode] [--name NAME] [--force]

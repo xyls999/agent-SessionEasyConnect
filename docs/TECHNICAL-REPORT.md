@@ -93,6 +93,18 @@
 - **现象**：`opencode import` 报 `Missing key at ["agent"]`（而且会先建出一个空 session）。
 - **修复**：`genOpenCodeImport` 里每条 `message.info` 都补 `agent`；assistant 补 `parentID/mode/path/cost/tokens/modelID/providerID/finish`；user 补 `model/summary`。重导入成功。
 
+### 阶段 5.1：OpenCode 自动导入（"注入了但 opencode 读不出来"的根治）
+- **现象**：`asec inject --to opencode` 只生成 import JSON，不落库；用户不知道还要手动执行
+  `opencode import`，或者在错误的 cwd 下执行（opencode 按**命令的 cwd**归入项目，不看
+  `info.directory`），导致会话列表里始终找不到；且无标题来源全部叫 "Imported from pi"，无法辨认。
+- **修复**（`src/inject.js`）：
+  - 生成 JSON 后自动 `spawnSync('opencode import "<file>"', { cwd: 会话目录 })`，解析输出
+    `Imported session: ses_...`，失败保留 JSON 并回退手工提示；
+  - JSON 默认写到 OS 临时目录，导入成功后自动删除（`--out FILE` / `--keep-file` 可保留，
+    `--no-import` 可跳过自动导入）；
+  - `genOpenCodeImport`：来源无标题时用**第一条用户消息文本**派生会话标题（≤60 字符），
+    方便在按项目过滤的会话列表里定位。
+
 ### 阶段 6：验证方法（这次补上的真实验证）
 - Codex 读：`codex exec resume <id> --json` 会出现 `{"type":"thread.started","thread_id":"<id>"}`；随后查 `thread_history_1.sqlite.thread_items` 能看到导入内容。
 - Pi 读：`pi --export <file> out.html`（只读，源文件 SHA256 不变）。

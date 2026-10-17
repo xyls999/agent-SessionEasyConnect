@@ -320,16 +320,36 @@ function genClaude(ir) {
   return { relPath: path.join(dir, file), content: lines.join('\n') + '\n', sid: id };
 }
 
-function genOpenCodeImport(ir) {
+// `target` optionally resolves the provider/model the imported session will actually use
+// when continued inside opencode (injected by src/inject.js from the user's live models).
+// Without it the session would be pinned to a nonexistent "imported" provider and every
+// attempt to continue the conversation would fail with "model not found"/Bad Request.
+function genOpenCodeImport(ir, target) {
+  const prov = (target && target.providerID) || 'imported';
+  const modelID = (target && target.modelID) || ir.model || 'imported';
   const sid = `ses_${U.hexId(6)}${base62(14)}`;
   const created = ir.created_at || Date.now();
   const cwd = String(ir.cwd || process.cwd()).replace(/^\\\\\?\\/, '').replace(/\\/g, '/');
+  // Sources like Pi sessions often have no title at all; derive one from the first
+  // user text so the imported session is findable in opencode's per-project list
+  // instead of a pile of identical "Imported from pi" entries.
+  const deriveTitle = () => {
+    for (const m of ir.messages || []) {
+      if (m.role !== 'user') continue;
+      for (const p of m.parts || []) {
+        if (p.type === 'text' && p.text && p.text.trim()) return p.text.trim().replace(/\s+/g, ' ').slice(0, 60);
+      }
+    }
+    return null;
+  };
+  const title = ir.title || deriveTitle() || `Imported from ${ir.agent}`;
   const info = {
     id: sid, slug: 'imported-session', projectID: 'global', directory: cwd,
-    path: 'session', title: ir.title || `Imported from ${ir.agent}`,
-    agent: 'build', model: { id: ir.model || 'imported', providerID: 'imported' },
+    path: 'session', title,
+    agent: 'build', model: { id: modelID, providerID: prov },
     version: '1.18.30', time: { created, updated: ir.updated_at || created },
   };
+  const msgModel = (m) => (target ? modelID : (m.model || ir.model || 'imported'));
 
   // opencode's import schema only accepts role "user" or "assistant" (no system/tool
   // messages), and tool calls/results belong to a single `tool` part with a `state`
@@ -364,8 +384,8 @@ function genOpenCodeImport(ir) {
     if (lastUserId) return;
     const pmid = `msg_${U.hexId(6)}${base62(14)}`;
     messages.push({
-      info: { id: pmid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: 'imported', modelID: ir.model || 'imported' }, summary: { diffs: [] } },
-      parts: [{ ...partBase(pmid), type: 'text', text: ir.title || '(imported session)' }],
+      info: { id: pmid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: prov, modelID }, summary: { diffs: [] } },
+      parts: [{ ...partBase(pmid), type: 'text', text: title }],
     });
     lastUserId = pmid;
   };
@@ -410,13 +430,13 @@ function genOpenCodeImport(ir) {
         path: { cwd, root: '/' },
         cost: 0,
         tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        modelID: m.model || ir.model || 'imported',
-        providerID: 'imported',
+        modelID: msgModel(m),
+        providerID: prov,
         finish: 'stop',
       });
     } else {
       Object.assign(minfo, {
-        model: { providerID: 'imported', modelID: m.model || ir.model || 'imported' },
+        model: { providerID: prov, modelID: msgModel(m) },
         summary: { diffs: [] },
       });
     }
@@ -427,8 +447,8 @@ function genOpenCodeImport(ir) {
   if (!messages.length) {
     const mid = `msg_${U.hexId(6)}${base62(14)}`;
     messages.push({
-      info: { id: mid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: 'imported', modelID: ir.model || 'imported' }, summary: { diffs: [] } },
-      parts: [{ id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid, type: 'text', text: ir.title || '(empty)' }],
+      info: { id: mid, sessionID: sid, role: 'user', agent: 'build', time: { created }, model: { providerID: prov, modelID }, summary: { diffs: [] } },
+      parts: [{ id: `prt_${U.hexId(6)}${base62(14)}`, sessionID: sid, messageID: mid, type: 'text', text: title }],
     });
   }
 

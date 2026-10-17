@@ -5,6 +5,21 @@ Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](ht
 
 ## [Unreleased]
 
+### Added
+- `inject --to opencode` now runs `opencode import` automatically from the session's own
+  directory, so imported sessions are immediately readable instead of being left as a JSON
+  file that many users never completed importing (or imported from the wrong cwd, filing the
+  session into the wrong project). The import JSON goes to the OS temp dir by default and is
+  removed after a successful import; `--out FILE`/`--keep-file` keep it, `--no-import` skips
+  the automatic step, and a failed auto-import keeps the JSON plus a manual fallback hint.
+- Imported OpenCode sessions are bound to a real, locally used provider/model (auto-detected
+  from the newest usable model in `opencode.db`, overridable with `--model provider/id`)
+  instead of being pinned to the nonexistent `imported` provider, so continuing an injected
+  conversation no longer fails on the first reply with "model not found"/Bad Request.
+- Untitled OpenCode imports derive the session title from the first user message, making
+  them findable in opencode's per-project session list instead of stacking up as
+  identical "Imported from pi" entries.
+
 ### Fixed
 - Context imports no longer append full/duplicate histories to `AGENTS.md` or
   `CLAUDE.md`, which could exceed Codex's instructions limit and could not be repaired
