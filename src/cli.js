@@ -62,7 +62,7 @@ function cmdInject(o) {
   if (fromAgent && fromAgent.includes(':')) { const [a, b] = fromAgent.split(':'); fromAgent = a; fromId = b; }
   const res = injector.inject({
     fromAgent, fromId, to: o.to, mode: o.mode, out: o.out, cwd: o.cwd, dryRun: !!o['dry-run'],
-    register: !o['no-register'], noImport: !!o['no-import'], keepFile: !!o['keep-file'], model: o.model,
+    register: !o['no-register'], noImport: !!o['no-import'], keepFile: !!o['keep-file'], model: o.model, tail: o.tail, maxKb: o['max-kb'],
   });
   console.log(JSON.stringify(res, null, 2));
   if (res.wrote && res.action === 'native') {
@@ -112,7 +112,7 @@ Usage:
   asec show <agent> <sessionId> [--format text|markdown|canonical]
   asec roots
   asec repair-context [--cwd DIR] [--to pi|codex|claude|opencode] [--dry-run] [--recover]
-  asec inject --from <agent>:<sessionId> --to <agent> [--mode native|context] [--out FILE] [--cwd DIR] [--dry-run] [--no-register] [--no-import] [--keep-file] [--model provider/id]
+  asec inject --from <agent>:<sessionId> --to <agent> [--mode native|context] [--out FILE] [--cwd DIR] [--dry-run] [--no-register] [--no-import] [--keep-file] [--model provider/id] [--tail N] [--max-kb KB]
   asec skills list [--json]
   asec skills roots
   asec skills install <path-to-skill-or-folder> [--to all|codex,pi,claude,opencode] [--name NAME] [--force]
@@ -130,6 +130,7 @@ Examples:
   asec inject --from claude:11111111-2222-3333-4444-555555555555 --to codex --mode native
   asec inject --from codex:01a09985-2328-7831-8a61-fee95d251a89 --to claude --mode native
   asec inject --from opencode:ses_xxxx --to pi --mode context --cwd E:\myproject
+  asec inject --from pi:<uuid> --to opencode --tail 30    # import only last 30 turns (continuable)
 
 Agents:
   codex     ~/.codex/sessions/**/rollout-*.jsonl            (JSONL)

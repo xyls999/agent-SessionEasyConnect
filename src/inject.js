@@ -61,17 +61,69 @@ function resolveOpenCodeTargetModel(opts) {
   return undefined;
 }
 
+function deriveOpenCodeTitle(ir) {
+  for (const m of ir.messages || []) {
+    if (m.role !== 'user') continue;
+    for (const p of m.parts || []) {
+      if (p.type === 'text' && p.text && p.text.trim()) return p.text.trim().replace(/\s+/g, ' ').slice(0, 60);
+    }
+  }
+  return `Imported from ${ir.agent}`;
+}
+
+// Keep the last maxMsgs messages, snapped forward to the first "user" turn so the slice
+// starts on a clean turn boundary (never mid tool-call/result). Returns all if no user
+// boundary exists in the kept window (e.g. a trailing assistant-only tail).
+// maxBytes further trims from the OLDEST kept message so the payload fits a model-context
+// budget (a huge tail still 400s on continue). Never drops the final user turn + response.
+function tailMessages(messages, maxMsgs, maxBytes) {
+  if (!Array.isArray(messages) || !messages.length) return messages;
+  let start = 0;
+  if (maxMsgs && messages.length > maxMsgs) start = messages.length - maxMsgs;
+  // snap forward to a user boundary within the count window
+  if (maxMsgs) { while (start < messages.length && messages[start].role !== 'user') start++; if (start >= messages.length) return messages; }
+  let kept = messages.slice(start);
+  if (maxBytes && maxBytes > 0) {
+    const size = (arr) => arr.reduce((s, m) => s + JSON.stringify(m).length, 0);
+    // drop oldest until under budget, but always keep the last 2 messages (the live turn)
+    let cut = 0;
+    while (kept.length - cut > 2 && size(kept.slice(cut)) > maxBytes) cut++;
+    if (cut > 0) {
+      kept = kept.slice(cut);
+      while (kept.length > 1 && kept[0].role !== 'user') kept = kept.slice(1);
+    }
+  }
+  return kept;
+}
+
 function injectNative(to, ir, opts) {
   if (to === 'opencode') {
     const target = resolveOpenCodeTargetModel(opts);
-    const gen = render.genOpenCodeImport(ir, target);
+    // Huge imports (long transcripts, big tool outputs) blow past the model's context on
+    // the first continue and the provider returns 400 Bad Request. --tail N imports only
+    // the last N turns (snapped forward to the next user boundary); --max-kb caps the
+    // kept payload by size (KB) so it actually fits a model context window.
+    let source = ir;
+    const maxBytes = opts.maxKb ? (parseInt(opts.maxKb, 10) > 0 ? parseInt(opts.maxKb, 10) * 1024 : (() => { throw new Error('--max-kb must be a positive number of kilobytes'); })()) : 0;
+    if (opts.tail || maxBytes) {
+      const n = opts.tail ? Math.max(2, parseInt(opts.tail, 10) || 0) : 0;
+      const kept = tailMessages(ir.messages, n, maxBytes);
+      source = { ...ir, messages: kept, title: `${ir.title || deriveOpenCodeTitle(ir)} — ${opts.tail ? `last ${n} turns` : 'recent turns'}${maxBytes ? ` (≤${opts.maxKb}KB)` : ''}` };
+    }
+    const gen = render.genOpenCodeImport(source, target);
+    const importMB = Math.round(Buffer.byteLength(gen.content) / 1048576 * 10) / 10;
     const cwd = String(ir.cwd || process.cwd()).replace(/^\\\\\?\\/, '');
     const tempOut = !opts.out;
     const out = tempOut ? path.join(os.tmpdir(), gen.file) : path.resolve(String(opts.out));
-    const res = { action: 'native', target: 'opencode', file: out, sid: gen.sid, wrote: !opts.dryRun };
+    const res = { action: 'native', target: 'opencode', file: out, sid: gen.sid, wrote: !opts.dryRun, sizeMB: Buffer.byteLength(gen.content) / 1048576 };
+    // Without --tail, warn up front when the imported history is big enough to 400 on the
+    // first continue (provider context limit), instead of leaving a mystery "Bad Request".
+    const bigNote = (!opts.tail && Buffer.byteLength(gen.content) > 6_000_000)
+      ? `; WARNING: history ~${importMB}MB - continuing this session in opencode will likely fail with provider 400 Bad Request (context overflow). Re-run with --tail N to import only the last N turns.`
+      : '';
     if (opts.dryRun) {
       res.hint = `opencode import "${out}"`;
-      res.note = `dry-run: nothing written; the real import runs \`opencode import\` automatically from ${cwd}`;
+      res.note = `dry-run: nothing written; the real import runs \`opencode import\` automatically from ${cwd}` + bigNote;
       return res;
     }
     U.ensureDir(path.dirname(out));
@@ -91,9 +143,10 @@ function injectNative(to, ir, opts) {
       }
       res.hint = `opencode (open it from the session directory: ${cwd})`;
       const bound = target ? `; continue-chat model bound: ${target.providerID}/${target.modelID}` : '; no usable local model found - pick one in opencode before continuing';
+      const tailNote = (opts.tail || maxBytes) ? `; trimmed: imported ${source.messages.length} of ${ir.messages.length} messages (${importMB}MB)` : '';
       res.note = (removed
         ? `imported into opencode.db (project ${cwd}); temp import JSON auto-removed (use --out/--keep-file to keep it)`
-        : `imported into opencode.db (project ${cwd}); import JSON kept at ${out}`) + bound;
+        : `imported into opencode.db (project ${cwd}); import JSON kept at ${out}`) + bound + tailNote + bigNote;
     } else {
       res.hint = `opencode import "${out}"`;
       res.note = `auto-import FAILED: ${imp.reason} — JSON kept at ${out}; run the hint from the session directory (${cwd}), or pass --no-import to skip auto-import`;
@@ -134,4 +187,4 @@ function inject(opts) {
   return injectNative(to, ir, opts);
 }
 
-module.exports = { inject, injectNative, importViaOpenCodeCli };
+module.exports = { inject, injectNative, importViaOpenCodeCli, tailMessages };

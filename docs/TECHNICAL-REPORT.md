@@ -104,6 +104,12 @@
     `--no-import` 可跳过自动导入）；
   - `genOpenCodeImport`：来源无标题时用**第一条用户消息文本**派生会话标题（≤60 字符），
     方便在按项目过滤的会话列表里定位。
+  - **续聊 Bad Request 根治**：会话级模型不再钉死虚构的 `imported` provider——自动取本机
+    `opencode.db` 里最近真实使用的 provider/model（可用 `--model provider/id` 覆盖）。
+    超长来源用 `--tail N`（按 user 边界回退取后 N 条）只注入最近若干轮；未 tail 且历史
+    >6MB 时输出显式警告，提示"opencode 续聊会整段重放历史 → 上下文超限 → 400 Bad
+    Request"，建议 `--tail`。实测 27MB/7094 条的会话整段导入后续聊必 400，`--tail 120`
+    （实际落在 user 边界 81 条 / 0.47MB）即可正常续。
 
 ### 阶段 6：验证方法（这次补上的真实验证）
 - Codex 读：`codex exec resume <id> --json` 会出现 `{"type":"thread.started","thread_id":"<id>"}`；随后查 `thread_history_1.sqlite.thread_items` 能看到导入内容。

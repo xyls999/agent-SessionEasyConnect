@@ -4,8 +4,19 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { injectNative } = require('../src/inject');
+const { injectNative, tailMessages } = require('../src/inject');
 const { genOpenCodeImport } = require('../src/render');
+
+test('tailMessages keeps the last N and snaps the start forward to a user turn', () => {
+  const msgs = [
+    { role: 'user' }, { role: 'assistant' }, { role: 'user' }, { role: 'assistant' }, { role: 'assistant' }, { role: 'user' }, { role: 'assistant' },
+  ];
+  assert.deepEqual(tailMessages(msgs, 5), [msgs[2], msgs[3], msgs[4], msgs[5], msgs[6]]); // start=2 already a user turn
+  assert.deepEqual(tailMessages(msgs, 3), [msgs[5], msgs[6]]); // start=4 (assistant) snaps to 5 (user)
+  assert.deepEqual(tailMessages(msgs, 20), msgs); // under budget: untouched
+  const noUserTail = [{ role: 'user' }, { role: 'assistant' }, { role: 'assistant' }];
+  assert.deepEqual(tailMessages(noUserTail, 2), noUserTail); // no user boundary in window: keep all
+});
 
 const ir = (over) => ({
   agent: 'pi', cwd: 'E:/tmp-issac', model: 'gpt-test', title: 'demo session',
@@ -99,5 +110,46 @@ test('--model provider/id is parsed and threaded into the generated session', (t
   const info = JSON.parse(fs.readFileSync(out, 'utf8')).info;
   assert.deepEqual(info.model, { id: 'qwen3.8-flash', providerID: 'opencode-go' });
   assert.throws(() => injectNative('opencode', ir(), { out, model: 'nodelimiter' }), /provider\/model/);
+});
+
+test('--tail imports only the last turns, starting at a user boundary', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asb-oc-tail-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'import.json');
+  const many = [];
+  for (let i = 0; i < 50; i++) {
+    if (i % 2 === 0) many.push({ role: 'user', ts: i, parts: [{ type: 'text', text: 'q' + i }] });
+    else many.push({ role: 'assistant', ts: i, parts: [{ type: 'text', text: 'a' + i }] });
+  }
+  const res = injectNative('opencode', ir({ messages: many }), { out, targetModel: false, tail: 5, runImport: () => ({ ok: true }) });
+  const doc = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.ok(doc.messages.length <= 5);
+  assert.equal(doc.messages[0].info.role, 'user');
+  assert.match(res.note, /trimmed: imported \d+ of 50 messages/);
+  assert.match(doc.info.title, /^demo session — last 5 turns$/);
+});
+
+test('--max-kb trims the kept tail to a byte budget, keeping the live turn', (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'asb-oc-kb-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const out = path.join(dir, 'import.json');
+  const big = [];
+  for (let i = 0; i < 30; i++) {
+    big.push({ role: i % 2 ? 'assistant' : 'user', ts: i, parts: [{ type: 'text', text: 'y'.repeat(10000) }] });
+  }
+  const res = injectNative('opencode', ir({ messages: big }), { out, targetModel: false, maxKb: 40, runImport: () => ({ ok: true }) });
+  const doc = JSON.parse(fs.readFileSync(out, 'utf8'));
+  assert.ok(doc.messages.length < 30);
+  assert.equal(doc.messages[0].info.role, 'user');
+  assert.match(doc.info.title, /— recent turns \(≤40KB\)$/);
+  assert.throws(() => injectNative('opencode', ir(), { out, targetModel: false, maxKb: '-5', runImport: () => ({ ok: true }) }), /positive/);
+});
+
+test('huge untailored opencode imports carry a continue-chat size warning', () => {
+  const big = [];
+  for (let i = 0; i < 300; i++) big.push({ role: i % 2 ? 'assistant' : 'user', ts: i, parts: [{ type: 'text', text: 'x'.repeat(30000) }] });
+  const res = injectNative('opencode', ir({ messages: big }), { dryRun: true, targetModel: false });
+  assert.match(res.note, /WARNING: history ~\d+(\.\d+)?MB/);
+  assert.match(res.note, /--tail N/);
 });
 

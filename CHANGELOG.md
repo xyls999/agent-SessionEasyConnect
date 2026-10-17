@@ -19,6 +19,11 @@ Format: [Keep a Changelog](https://keepachangelog.com/); versioning: [SemVer](ht
 - Untitled OpenCode imports derive the session title from the first user message, making
   them findable in opencode's per-project session list instead of stacking up as
   identical "Imported from pi" entries.
+- `--tail N` / `--max-kb KB` (opencode target) import only the last N turns (snapped to a
+  user boundary) and/or cap the kept payload by size, giving a small, continuable session
+  for very long sources. Huge untailored imports now print an explicit warning instead of
+  failing later with a mystery 400 Bad Request when opencode replays the whole oversized
+  history to the provider on the first continue.
 
 ### Fixed
 - Context imports no longer append full/duplicate histories to `AGENTS.md` or

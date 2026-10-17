@@ -66,7 +66,7 @@ function handler(req, res) {
     }
     if (req.method === 'POST' && p === '/api/inject') {
       return readBody(req).then((b) => {
-        const r = injector.inject({ fromAgent: b.fromAgent, fromId: b.fromId, to: b.to, mode: b.mode, cwd: b.cwd, dryRun: !!b.dryRun, noImport: !!b.noImport, model: b.model });
+        const r = injector.inject({ fromAgent: b.fromAgent, fromId: b.fromId, to: b.to, mode: b.mode, cwd: b.cwd, dryRun: !!b.dryRun, noImport: !!b.noImport, model: b.model, tail: b.tail, maxKb: b.maxKb });
         sendJson(res, 200, r);
       }).catch((e) => sendJson(res, 500, { error: String(e.message || e) }));
     }

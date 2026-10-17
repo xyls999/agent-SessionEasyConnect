@@ -80,6 +80,10 @@ asec inject --from pi:<uuid>      --to opencode            # auto-runs `opencode
 # (the JSON goes to the OS temp dir by default and is removed after a successful import)
 # --model provider/id binds the session's continue-chat model; by default asec auto-detects
 # the newest real provider/model from your local opencode store (never the phantom 'imported')
+# --tail N imports only the last N turns (snapped to a user boundary): use it for very long
+# sources - a huge full history will 400 (context overflow) on the first continue in opencode.
+# --max-kb KB additionally caps the kept payload by size (trimming oldest kept turns).
+asec inject --from pi:<uuid> --to opencode --tail 300 --max-kb 300   # small, continuable session
 
 # context: archive the full transcript and add a short reference to AGENTS.md / CLAUDE.md
 asec inject --from codex:<uuid> --to claude --mode context --cwd E:\myproject
@@ -181,6 +185,13 @@ Each target needs different handling to actually read the injected session.
   expect.
 - Untitled sources (e.g. most Pi sessions) get a session title derived from the first user
   message, so imports are findable instead of a pile of identical "Imported from pi" entries.
+- Continue-chat model binding: the imported session defaults to the newest real provider/model
+  found in your local `opencode.db` (override with `--model provider/id`), instead of a
+  nonexistent `imported` provider that failed the first reply.
+- `--tail N` imports only the last N turns (snapped to a user boundary). Very long sources
+  import fine but **fail with 400 Bad Request on the first continue** because opencode replays
+  the whole history and the provider rejects it (context overflow); asec now also prints a size
+  warning when an untailored import exceeds ~6MB of history.
 - The generator only emits `user`/`assistant` messages (system/developer dropped, tool results
   merged into the assistant's `tool` part), guarantees `parentID` on assistant messages, wraps
   non-object tool inputs, and sets `state.title`/`metadata`/`time` to satisfy OpenCode's schema.
